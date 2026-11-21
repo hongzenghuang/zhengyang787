@@ -1,74 +1,42 @@
-import { useEffect, useRef, useCallback } from 'react';
-import { FlightAction } from './types';
+import { useCallback, useEffect } from 'react';
+import type { FlightAction } from './types';
 
 export function useKeyboardControls(dispatch: React.Dispatch<FlightAction>) {
-  const keysPressed = useRef<Set<string>>(new Set());
-  
-  const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    // 防止浏览器默认行为
-    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
-      e.preventDefault();
-    }
-    
-    keysPressed.current.add(e.key);
-    
-    // 一次性触发的动作
-    switch(e.key) {
-      case '1':
-        dispatch({ type: 'TOGGLE_ENGINE', engine: 1 });
-        break;
-      case '2':
-        dispatch({ type: 'TOGGLE_ENGINE', engine: 2 });
-        break;
-      case 'p':
-      case 'P':
-        dispatch({ type: 'TOGGLE_AUTOPILOT' });
-        break;
-      case '[':
-        dispatch({ type: 'FLAPS_UP' });
-        break;
-      case ']':
-        dispatch({ type: 'FLAPS_DOWN' });
-        break;
+  const handleKeyDown = useCallback((event: KeyboardEvent) => {
+    const target = event.target as HTMLElement | null;
+    const tag = target?.tagName;
+    if (target?.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(tag ?? '')) return;
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    if (tag === 'BUTTON' && (event.code === 'Space' || event.key === 'Enter')) return;
+
+    const key = event.key.toLowerCase();
+    const discrete = ['1', '2', 'p', 'r', 'g', ' ', '[', ']'].includes(key) || event.code === 'Space';
+    if (discrete && event.repeat) return;
+
+    switch (key) {
+      case '1': dispatch({ type: 'TOGGLE_ENGINE', engine: 1 }); break;
+      case '2': dispatch({ type: 'TOGGLE_ENGINE', engine: 2 }); break;
+      case 'p': dispatch({ type: 'TOGGLE_AUTOPILOT' }); break;
+      case 'r': dispatch({ type: 'TOGGLE_REVERSE' }); break;
+      case 'g': dispatch({ type: 'TOGGLE_GEAR' }); break;
+      case '[': dispatch({ type: 'ADJUST_FLAPS', delta: -5 }); break;
+      case ']': dispatch({ type: 'ADJUST_FLAPS', delta: 5 }); break;
+      case 'w': dispatch({ type: 'ADJUST_THROTTLE', delta: 2 }); break;
+      case 's': dispatch({ type: 'ADJUST_THROTTLE', delta: -2 }); break;
+      case 'arrowup': event.preventDefault(); dispatch({ type: 'ADJUST_PITCH', delta: 0.7 }); break;
+      case 'arrowdown': event.preventDefault(); dispatch({ type: 'ADJUST_PITCH', delta: -0.7 }); break;
+      case 'arrowleft': event.preventDefault(); dispatch({ type: 'ADJUST_ROLL', delta: -2 }); break;
+      case 'arrowright': event.preventDefault(); dispatch({ type: 'ADJUST_ROLL', delta: 2 }); break;
+      default:
+        if (event.code === 'Space') {
+          event.preventDefault();
+          dispatch({ type: 'TOGGLE_PAUSE' });
+        }
     }
   }, [dispatch]);
-  
-  const handleKeyUp = useCallback((e: KeyboardEvent) => {
-    keysPressed.current.delete(e.key);
-  }, []);
-  
+
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    
-    // 持续按键处理 - 每 50ms 检查一次
-    const interval = setInterval(() => {
-      const keys = keysPressed.current;
-      
-      if (keys.has('ArrowUp')) {
-        dispatch({ type: 'PITCH_UP' });
-      }
-      if (keys.has('ArrowDown')) {
-        dispatch({ type: 'PITCH_DOWN' });
-      }
-      if (keys.has('ArrowLeft')) {
-        dispatch({ type: 'ROLL_LEFT' });
-      }
-      if (keys.has('ArrowRight')) {
-        dispatch({ type: 'ROLL_RIGHT' });
-      }
-      if (keys.has('w') || keys.has('W')) {
-        dispatch({ type: 'THROTTLE_UP' });
-      }
-      if (keys.has('s') || keys.has('S')) {
-        dispatch({ type: 'THROTTLE_DOWN' });
-      }
-    }, 50);
-    
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-      clearInterval(interval);
-    };
-  }, [handleKeyDown, handleKeyUp, dispatch]);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleKeyDown]);
 }

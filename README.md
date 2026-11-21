@@ -1,28 +1,30 @@
 # 787-10 Flight Deck Simulator
 
-A browser-based, simplified 787-10 flight-deck simulator. It runs in the Next.js app and as a self-contained static page.
+A browser-based Boeing 787-10 flight-deck simulation built with Next.js and React.
 
-## Run it
+## Run locally
 
 ```bash
 pnpm install
 pnpm dev
 ```
 
-Open `http://localhost:5001`. The standalone version is `public/boeing787-simulator.html`; its scenery asset is `public/outside-scene.svg`.
+Open `http://localhost:5001`.
 
-## Simulator controls
+## Project structure
 
-| Key | Action |
-| --- | --- |
-| `1` / `2` | Start or stop engine 1 / 2 |
-| `W` / `S` | Increase or reduce throttle |
-| Arrow keys | Pitch and bank |
-| `[` / `]` | Retract or extend flaps |
-| `P` | Engage or disengage autopilot |
-| `R` | Toggle simulated reverse thrust when the ground interlocks allow it |
-| `Space` | Pause or resume |
+- `src/components/FlightDeckSimulator.tsx` composes the cockpit interface.
+- `src/components/` contains the flight scene, PFD, engine panel, autopilot panel, and controls.
+- `src/hooks/useFlightSimulation.ts` owns simulation state and the fixed-rate update loop.
+- `src/lib/flight-physics.ts` updates flight dynamics and engine readings.
+- `src/lib/autopilot.ts` handles target capture, control commands, and alerts.
+- `src/lib/keyboard-handler.ts` maps keyboard shortcuts to simulation actions.
+- `public/outside-scene.svg` supplies the exterior scenery.
 
-When the autopilot is engaged, its heading, airspeed, and altitude target knobs become active. The simulator also includes a primary flight display, engine readings, alerts, landing gear, exterior scenery, day/night theme, reset, and fullscreen controls.
+## Controls
 
-This is an educational browser simulation. It does not reproduce certified aircraft systems or flight-control behavior.
+Buttons and sliders are available in the cockpit. Keyboard shortcuts are `1` / `2` engines, `W` / `S` throttle, arrow keys pitch and bank, `[` / `]` flaps, `G` landing gear, `P` autopilot, `R` reverse thrust, and `Space` pause.
+
+Autopilot target controls become active when the autopilot is engaged. Reverse thrust is simulated and only available on the ground with both engines running, gear down, and autopilot off.
+
+This is an educational simulation with simplified flight dynamics, not a certified aircraft training system.

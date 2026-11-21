@@ -1,126 +1,84 @@
-import { FlightState } from './types';
+import type { EngineState, FlightState } from './types';
 
-// 飞动物理常量
-const GRAVITY = 9.81; // m/s²
-const AIR_DENSITY = 1.225; // kg/m³ (海平面)
-const WING_AREA = 325; // m² (787-10 翼面积)
-const MASS = 254000; // kg (787-10 最大起飞重量)
-const MAX_THRUST = 320000; // N (双引擎总推力)
-
-// 气动系数
-const CL_BASE = 0.5; // 基础升力系数
-const CD_BASE = 0.02; // 基础阻力系数
-const FLAP_CL_BONUS = 0.15; // 襟翼每 10° 增加的升力系数
-
-// 转换系数
-const KNOTS_TO_MS = 0.514444; // 节转米/秒
-const FT_TO_M = 0.3048; // 英尺转米
-const DEG_TO_RAD = Math.PI / 180;
+const GRAVITY = 9.81;
+const SEA_LEVEL_DENSITY = 1.225;
+const WING_AREA = 325;
+const MASS = 254_000;
+const MAX_THRUST = 620_000;
+const KNOTS_TO_METERS_PER_SECOND = 0.514444;
+const METERS_TO_FEET = 3.28084;
+const MAX_ALTITUDE = 45_000;
+const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+const approach = (value: number, target: number, amount: number) =>
+  value < target ? Math.min(value + amount, target) : Math.max(value - amount, target);
 
 export function updateFlightPhysics(state: FlightState, deltaTime: number): FlightState {
-  const dt = deltaTime / 1000; // 转为秒
-  
-  // 计算空气密度 (随高度变化)
-  const altitudeM = state.altitude * FT_TO_M;
-  const airDensity = AIR_DENSITY * Math.exp(-altitudeM / 8500);
-  
-  // 计算空速 (米/秒)
-  const airspeedMS = state.airspeed * KNOTS_TO_MS;
-  
-  // 计算升力系数 (考虑襟翼)
-  const flapBonus = (state.flaps / 10) * FLAP_CL_BONUS;
-  const cl = CL_BASE + flapBonus + (state.pitch * 0.01);
-  
-  // 计算升力
-  const lift = 0.5 * airDensity * airspeedMS * airspeedMS * WING_AREA * cl;
-  
-  // 计算阻力
-  const cd = CD_BASE + (state.flaps * 0.005) + (Math.abs(state.roll) * 0.001);
-  const drag = 0.5 * airDensity * airspeedMS * airspeedMS * WING_AREA * cd;
-  
-  // 计算推力
-  const engineFactor = (state.engine1.running ? 0.5 : 0) + (state.engine2.running ? 0.5 : 0);
-  const thrust = (state.throttle / 100) * MAX_THRUST * engineFactor;
-  
-  // 计算重力
-  const weight = MASS * GRAVITY;
-  
-  // 计算合力 (简化模型)
-  const pitchRad = state.pitch * DEG_TO_RAD;
-  const netForceVertical = lift * Math.cos(state.roll * DEG_TO_RAD) - weight + thrust * Math.sin(pitchRad);
-  const netForceHorizontal = thrust * Math.cos(pitchRad) - drag;
-  
-  // 计算加速度
-  const accelVertical = netForceVertical / MASS;
-  const accelHorizontal = netForceHorizontal / MASS;
-  
-  // 更新垂直速度 (英尺/分钟)
-  const verticalSpeedMS = accelVertical * dt;
-  const newVerticalSpeed = state.verticalSpeed + (verticalSpeedMS / FT_TO_M) * 60;
-  
-  // 更新空速
-  const speedChange = (accelHorizontal / KNOTS_TO_MS) * dt;
-  let newAirspeed = Math.max(0, state.airspeed + speedChange);
-  
-  // 更新高度
-  const altitudeChange = (newVerticalSpeed / 60) * dt;
-  let newAltitude = Math.max(0, state.altitude + altitudeChange);
-  
-  // 更新姿态 (基于控制输入的自然衰减 - 减慢衰减速度)
-  let newPitch = state.pitch * 0.995; // 更慢的自然回中
-  let newRoll = state.roll * 0.99; // 更慢的自然回中
-  let newHeading = state.heading;
-  
-  // 滚转影响航向
-  if (Math.abs(state.roll) > 5) {
-    newHeading = (state.heading + state.roll * 0.1 * dt) % 360;
-    if (newHeading < 0) newHeading += 360;
+  const dt = clamp(deltaTime / 1000, 0, 0.05);
+  const altitudeMeters = state.altitude * 0.3048;
+  const density = SEA_LEVEL_DENSITY * Math.exp(-altitudeMeters / 8500);
+  const speedMs = state.airspeed * KNOTS_TO_METERS_PER_SECOND;
+  const flapLift = (state.flaps / 30) * 0.42;
+  const liftCoefficient = clamp(0.50 + flapLift + state.pitch * 0.018, 0.15, 1.55);
+  const dragCoefficient = 0.024 + state.flaps * 0.00075 + Math.abs(state.roll) * 0.00035;
+  const dynamicPressure = 0.5 * density * speedMs * speedMs;
+  const lift = dynamicPressure * WING_AREA * liftCoefficient;
+  const drag = dynamicPressure * WING_AREA * dragCoefficient;
+  const runningEngines = Number(state.engine1.running) + Number(state.engine2.running);
+  const engineFactor = runningEngines / 2;
+  const thrustSign = state.reverse ? -0.42 : 1;
+  const thrust = (state.throttle / 100) * MAX_THRUST * engineFactor * thrustSign;
+  const pitchRadians = (state.pitch * Math.PI) / 180;
+  const verticalForce = lift * Math.cos((state.roll * Math.PI) / 180) - MASS * GRAVITY + thrust * Math.sin(pitchRadians);
+  const ground = state.altitude <= 0 && state.verticalSpeed <= 0;
+  const rollingResistance = ground ? MASS * GRAVITY * 0.018 : 0;
+  const horizontalAcceleration = (thrust * Math.cos(pitchRadians) - drag - rollingResistance) / MASS;
+  const verticalAcceleration = verticalForce / MASS;
+
+  let airspeed = clamp(state.airspeed + (horizontalAcceleration / KNOTS_TO_METERS_PER_SECOND) * dt, 0, 390);
+  let verticalSpeed = state.verticalSpeed;
+  let altitude = state.altitude;
+
+  if (ground && verticalForce <= 0) {
+    altitude = 0;
+    verticalSpeed = 0;
+  } else {
+    verticalSpeed = clamp(verticalSpeed + verticalAcceleration * dt * METERS_TO_FEET * 60, -3500, 3500);
+    altitude = clamp(altitude + (verticalSpeed / 60) * dt, 0, MAX_ALTITUDE);
+    if (altitude === 0 && verticalSpeed < 0) verticalSpeed = 0;
   }
-  
-  // 更新引擎参数
-  const throttleFactor = state.throttle / 100;
-  const newEngine1 = updateEngine(state.engine1, throttleFactor, state.engine1.running);
-  const newEngine2 = updateEngine(state.engine2, throttleFactor, state.engine2.running);
-  
+
+  const headingRate = state.roll * 0.18;
+  const heading = (state.heading + headingRate * dt + 360) % 360;
+  const pitch = approach(state.pitch, state.autopilot.active ? state.pitch : 0, 1.4 * dt);
+  const roll = approach(state.roll, state.autopilot.active ? state.roll : 0, 2.5 * dt);
+  const engine1 = updateEngine(state.engine1, state.throttle, dt);
+  const engine2 = updateEngine(state.engine2, state.throttle, dt);
+  const fuelUse = runningEngines * (0.000035 + state.throttle * 0.0000012) * dt;
+
   return {
     ...state,
-    altitude: newAltitude,
-    pitch: newPitch,
-    roll: newRoll,
-    heading: newHeading,
-    airspeed: newAirspeed,
-    verticalSpeed: newVerticalSpeed,
-    engine1: newEngine1,
-    engine2: newEngine2,
+    airspeed,
+    altitude,
+    verticalSpeed,
+    heading,
+    pitch,
+    roll,
+    engine1,
+    engine2,
+    fuel: Math.max(0, state.fuel - fuelUse),
+    simTime: state.simTime + dt,
+    reverse: state.reverse && (altitude >= 40 || !state.gearDown || state.autopilot.active || runningEngines !== 2)
+      ? false
+      : state.reverse,
   };
 }
 
-function updateEngine(engine: { running: boolean; n1: number; egt: number; fuelFlow: number }, throttle: number, running: boolean) {
-  if (!running) {
-    return {
-      ...engine,
-      n1: Math.max(0, engine.n1 - 2),
-      egt: Math.max(20, engine.egt - 5),
-      fuelFlow: 0,
-    };
-  }
-  
-  const targetN1 = 20 + throttle * 0.8; // 怠速 20%，满油门 100%
-  const n1Change = (targetN1 - engine.n1) * 0.1;
-  const newN1 = Math.max(0, Math.min(100, engine.n1 + n1Change));
-  
-  const targetEgt = 200 + throttle * 5; // 200-700°C
-  const egtChange = (targetEgt - engine.egt) * 0.05;
-  const newEgt = Math.max(20, Math.min(900, engine.egt + egtChange));
-  
-  const targetFuelFlow = throttle * 60; // 0-6000 kg/h
-  const fuelFlowChange = (targetFuelFlow - engine.fuelFlow) * 0.1;
-  const newFuelFlow = Math.max(0, engine.fuelFlow + fuelFlowChange);
-  
-  return {
-    ...engine,
-    n1: newN1,
-    egt: newEgt,
-    fuelFlow: newFuelFlow,
-  };
+function updateEngine(engine: EngineState, throttle: number, dt: number): EngineState {
+  const targetN1 = engine.running ? 24 + throttle * 0.74 : 0;
+  const n1 = approach(engine.n1, targetN1, (engine.running ? 25 : 34) * dt);
+  const targetEgt = engine.running ? 210 + throttle * 4.2 : 20;
+  const egt = approach(engine.egt, targetEgt, (engine.running ? 130 : 90) * dt);
+  const targetFuelFlow = engine.running ? 350 + throttle * 55 : 0;
+  const fuelFlow = approach(engine.fuelFlow, targetFuelFlow, 900 * dt);
+  return { ...engine, n1, egt, fuelFlow };
 }

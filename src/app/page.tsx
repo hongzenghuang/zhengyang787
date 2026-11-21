@@ -1,5 +1,5 @@
-import { FlightDeckFrame } from '@/components/FlightDeckFrame';
+import { FlightDeckSimulator } from '@/components/FlightDeckSimulator';
 
 export default function HomePage() {
-  return <FlightDeckFrame />;
+  return <FlightDeckSimulator />;
 }

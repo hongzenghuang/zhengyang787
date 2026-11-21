@@ -1,158 +1,119 @@
-import { useReducer, useEffect, useRef } from 'react';
-import { FlightState, FlightAction } from '@/lib/types';
+import { useEffect, useReducer, useRef } from 'react';
+import { applyAutopilot, checkAlerts } from '@/lib/autopilot';
 import { updateFlightPhysics } from '@/lib/flight-physics';
-import { updateAutopilot, checkAlerts } from '@/lib/autopilot';
+import type { AutopilotTarget, FlightAction, FlightState } from '@/lib/types';
 
-const initialState: FlightState = {
-  altitude: 0,           // 地面
-  pitch: 0,
-  roll: 0,
-  heading: 270,          // 朝西
-  airspeed: 0,           // 静止
-  verticalSpeed: 0,
-  throttle: 0,           // 油门关闭
-  flaps: 0,              // 襟翼收起
-  engine1: {
-    running: false,      // 引擎关闭
-    n1: 0,
-    egt: 20,             // 环境温度
-    fuelFlow: 0,
-  },
-  engine2: {
-    running: false,      // 引擎关闭
-    n1: 0,
-    egt: 20,
-    fuelFlow: 0,
-  },
-  autopilot: {
-    active: false,       // 自动驾驶关闭
-    targetAirspeed: 0,
-    targetAltitude: 0,
-    targetHeading: 270,
-  },
-  alerts: [],
-  gearDown: true,        // 起落架放下（地面状态）
-};
+const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
-function flightReducer(state: FlightState, action: FlightAction): FlightState {
+export function createInitialFlightState(): FlightState {
+  return {
+    altitude: 0,
+    pitch: 0,
+    roll: 0,
+    heading: 270,
+    airspeed: 0,
+    verticalSpeed: 0,
+    throttle: 0,
+    flaps: 0,
+    engine1: { running: false, n1: 0, egt: 20, fuelFlow: 0 },
+    engine2: { running: false, n1: 0, egt: 20, fuelFlow: 0 },
+    autopilot: { active: false, targetAirspeed: 180, targetAltitude: 3000, targetHeading: 270 },
+    alerts: [{ type: 'SYSTEM', severity: 'ADVISORY', message: 'SYSTEMS NOMINAL · READY FOR TAKEOFF' }],
+    gearDown: true,
+    reverse: false,
+    paused: false,
+    simTime: 0,
+    fuel: 101,
+  };
+}
+
+function updateTarget(state: FlightState, target: AutopilotTarget, delta: number): FlightState {
+  const autopilot = { ...state.autopilot };
+  if (target === 'targetHeading') {
+    autopilot.targetHeading = (autopilot.targetHeading + delta + 360) % 360;
+  } else if (target === 'targetAirspeed') {
+    autopilot.targetAirspeed = clamp(autopilot.targetAirspeed + delta, 130, 330);
+  } else {
+    autopilot.targetAltitude = clamp(autopilot.targetAltitude + delta, 1000, 43_000);
+  }
+  return { ...state, autopilot };
+}
+
+function reducer(state: FlightState, action: FlightAction): FlightState {
   switch (action.type) {
-    case 'TOGGLE_ENGINE':
-      if (action.engine === 1) {
-        return {
-          ...state,
-          engine1: { ...state.engine1, running: !state.engine1.running },
-        };
-      } else {
-        return {
-          ...state,
-          engine2: { ...state.engine2, running: !state.engine2.running },
-        };
-      }
-    
-    case 'TOGGLE_AUTOPILOT':
-      const newActive = !state.autopilot.active;
+    case 'TOGGLE_ENGINE': {
+      const key = action.engine === 1 ? 'engine1' : 'engine2';
+      return { ...state, [key]: { ...state[key], running: !state[key].running } };
+    }
+    case 'TOGGLE_AUTOPILOT': {
+      if (!state.autopilot.active && (state.airspeed < 100 || !state.engine1.running || !state.engine2.running)) return state;
+      const active = !state.autopilot.active;
       return {
         ...state,
         autopilot: {
-          ...state.autopilot,
-          active: newActive,
-          targetAirspeed: newActive ? state.airspeed : state.autopilot.targetAirspeed,
-          targetAltitude: newActive ? state.altitude : state.autopilot.targetAltitude,
-          targetHeading: newActive ? state.heading : state.autopilot.targetHeading,
+          active,
+          targetAirspeed: active ? clamp(Math.round(state.airspeed), 130, 330) : state.autopilot.targetAirspeed,
+          targetAltitude: active ? clamp(Math.round(state.altitude / 100) * 100, 1000, 43_000) : state.autopilot.targetAltitude,
+          targetHeading: active ? Math.round(state.heading) % 360 : state.autopilot.targetHeading,
         },
+        reverse: active ? false : state.reverse,
       };
-    
-    case 'FLAPS_UP':
-      return {
-        ...state,
-        flaps: Math.max(0, state.flaps - 5),
-      };
-    
-    case 'FLAPS_DOWN':
-      return {
-        ...state,
-        flaps: Math.min(30, state.flaps + 5),
-      };
-    
-    case 'PITCH_UP':
-      return {
-        ...state,
-        pitch: Math.min(30, state.pitch + 2),
-      };
-    
-    case 'PITCH_DOWN':
-      return {
-        ...state,
-        pitch: Math.max(-30, state.pitch - 2),
-      };
-    
-    case 'ROLL_LEFT':
-      return {
-        ...state,
-        roll: Math.max(-45, state.roll - 5),
-      };
-    
-    case 'ROLL_RIGHT':
-      return {
-        ...state,
-        roll: Math.min(45, state.roll + 5),
-      };
-    
-    case 'THROTTLE_UP':
-      return {
-        ...state,
-        throttle: Math.min(100, state.throttle + 5),
-      };
-    
-    case 'THROTTLE_DOWN':
-      return {
-        ...state,
-        throttle: Math.max(0, state.throttle - 5),
-      };
-    
-    case 'UPDATE_PHYSICS':
-      // 更新飞动物理
-      let newState = updateFlightPhysics(state, action.deltaTime);
-      
-      // 更新自动驾驶
-      const autopilotUpdates = updateAutopilot(newState, action.deltaTime);
-      newState = { ...newState, ...autopilotUpdates };
-      
-      // 检查警报
-      const alerts = checkAlerts(newState);
-      newState = { ...newState, alerts };
-      
-      return newState;
-    
+    }
+    case 'ADJUST_TARGET':
+      return state.autopilot.active ? updateTarget(state, action.target, action.delta) : state;
+    case 'SET_THROTTLE':
+      return { ...state, throttle: clamp(action.value, 0, 100) };
+    case 'ADJUST_THROTTLE':
+      return { ...state, throttle: clamp(state.throttle + action.delta, 0, 100) };
+    case 'SET_FLAPS':
+      return { ...state, flaps: clamp(Math.round(action.value / 5) * 5, 0, 30) };
+    case 'ADJUST_FLAPS':
+      return { ...state, flaps: clamp(state.flaps + Math.sign(action.delta) * 5, 0, 30) };
+    case 'ADJUST_PITCH':
+      return { ...state, pitch: clamp(state.pitch + action.delta, -12, 15) };
+    case 'ADJUST_ROLL':
+      return { ...state, roll: clamp(state.roll + action.delta, -35, 35) };
+    case 'TOGGLE_GEAR':
+      return { ...state, gearDown: !state.gearDown, reverse: state.gearDown ? false : state.reverse };
+    case 'TOGGLE_REVERSE': {
+      const canUseReverse = state.altitude < 40 && state.gearDown && state.engine1.running && state.engine2.running && !state.autopilot.active;
+      return canUseReverse || state.reverse ? { ...state, reverse: !state.reverse } : state;
+    }
+    case 'TOGGLE_PAUSE':
+      return { ...state, paused: !state.paused };
+    case 'RESET':
+      return createInitialFlightState();
+    case 'UPDATE_PHYSICS': {
+      if (state.paused) return state;
+      const controlled = applyAutopilot(state, action.deltaTime);
+      const next = updateFlightPhysics(controlled, action.deltaTime);
+      return { ...next, alerts: checkAlerts(next) };
+    }
     default:
       return state;
   }
 }
 
 export function useFlightSimulation() {
-  const [state, dispatch] = useReducer(flightReducer, initialState);
-  const lastTimeRef = useRef<number>(Date.now());
-  const animationFrameRef = useRef<number>(0);
-  
+  const [state, dispatch] = useReducer(reducer, undefined, createInitialFlightState);
+  const lastFrame = useRef<number | null>(null);
+  const lastStep = useRef<number>(0);
+
   useEffect(() => {
-    const update = () => {
-      const now = Date.now();
-      const deltaTime = now - lastTimeRef.current;
-      lastTimeRef.current = now;
-      
-      dispatch({ type: 'UPDATE_PHYSICS', deltaTime });
-      
-      animationFrameRef.current = requestAnimationFrame(update);
-    };
-    
-    animationFrameRef.current = requestAnimationFrame(update);
-    
-    return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
+    let frame = 0;
+    const tick = (now: number) => {
+      if (lastFrame.current === null) lastFrame.current = now;
+      const elapsed = Math.min(now - lastFrame.current, 50);
+      lastFrame.current = now;
+      if (now - lastStep.current >= 33) {
+        lastStep.current = now;
+        dispatch({ type: 'UPDATE_PHYSICS', deltaTime: elapsed });
       }
+      frame = requestAnimationFrame(tick);
     };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
   }, []);
-  
+
   return { state, dispatch };
 }
