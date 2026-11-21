@@ -2,8 +2,8 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: '波音 787-10 飞行模拟器',
-  description: '基于 Web 的波音 787-10 飞行模拟器',
+  title: '787-10 Night Deck · Flight Simulator',
+  description: 'Browser-based Boeing 787-10 flight simulator with interactive cockpit controls.',
 };
 
 export default function RootLayout({

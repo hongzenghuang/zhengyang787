@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 760" preserveAspectRatio="none">
+  <defs>
+    <linearGradient id="distant" x2="0" y2="1"><stop stop-color="#7895a0"/><stop offset="1" stop-color="#667f7c"/></linearGradient>
+    <linearGradient id="land" x2="0" y2="1"><stop stop-color="#536b52"/><stop offset="1" stop-color="#24382e"/></linearGradient>
+    <linearGradient id="runway" x2="0" y2="1"><stop stop-color="#343a3d"/><stop offset="1" stop-color="#171d21"/></linearGradient>
+    <pattern id="fields" width="260" height="115" patternUnits="userSpaceOnUse" patternTransform="skewX(-24)">
+      <path d="M0 18H260M0 48H260M0 78H260" stroke="#b0aa75" stroke-opacity=".13" stroke-width="2"/>
+      <path d="M28 0V115M119 0V115M206 0V115" stroke="#d1bf86" stroke-opacity=".1" stroke-width="2"/>
+      <path d="M0 96H260" stroke="#182b25" stroke-opacity=".55" stroke-width="9"/>
+    </pattern>
+    <pattern id="city" width="82" height="90" patternUnits="userSpaceOnUse">
+      <path d="M5 42h12V13h12v29h8V24h15v18h9V7h12v35h8v40H5z" fill="#384944"/>
+      <path d="M11 51h4v5h-4zm13 0h4v5h-4zm17 0h4v5h-4zm16 0h4v5h-4zm16 0h4v5h-4z" fill="#d5bb77" opacity=".46"/>
+    </pattern>
+    <linearGradient id="fade" x2="0" y2="1"><stop stop-color="#fff" stop-opacity=".22"/><stop offset=".3" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".18"/></linearGradient>
+  </defs>
+  <path d="M0 202 105 154l96 39 125-97 91 79 103-124 101 117 88-61 120 86 99-107 122 100 93-73 90 66 111-42 135 72 120-29v270H0z" fill="url(#distant)" opacity=".78"/>
+  <path d="M0 279 120 222l114 38 136-82 140 91 121-62 117 63 111-116 114 96 119-72 119 75 135-50 154 81v192H0z" fill="#526760" opacity=".76"/>
+  <path d="M0 322h1600v438H0z" fill="url(#land)"/>
+  <path d="M0 328h1600v432H0z" fill="url(#fields)" opacity=".8"/>
+  <path d="M0 295h1600v102H0z" fill="url(#city)" opacity=".7"/>
+  <path d="M0 392q220-20 430 2t420-3q225-14 390 1t360-7" fill="none" stroke="#d4c797" stroke-opacity=".33" stroke-width="4"/>
+  <g fill="#d5c58b" opacity=".37"><circle cx="155" cy="347" r="3"/><circle cx="294" cy="361" r="2.5"/><circle cx="476" cy="343" r="3"/><circle cx="692" cy="362" r="2"/><circle cx="1070" cy="348" r="3"/><circle cx="1395" cy="363" r="2.5"/></g>
+  <path d="M0 0h1600v760H0z" fill="url(#fade)"/>
+</svg>
