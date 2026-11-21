@@ -1,0 +1,87 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0d0d0d !important;
+  --foreground: #ffffff !important;
+  --card: #1a1a1a !important;
+  --card-foreground: #ffffff !important;
+  --popover: #1a1a1a !important;
+  --popover-foreground: #ffffff !important;
+  --primary: #ffa500 !important;
+  --primary-foreground: 210 40% 98%;
+  --secondary: #4a4a4a !important;
+  --secondary-foreground: 222.2 47.4% 11.2%;
+  --muted: 210 40% 96.1%;
+  --muted-foreground: #b0b0b0 !important;
+  --accent: #33ff33 !important;
+  --accent-foreground: 222.2 47.4% 11.2%;
+  --destructive: #ff3333 !important;
+  --destructive-foreground: 210 40% 98%;
+  --border: 214.3 31.8% 91.4%;
+  --input: 214.3 31.8% 91.4%;
+  --ring: 32 100% 50%;
+  --radius: 8px !important;
+
+  /* 画布配色映射 */
+  --color-surface: var(--card) !important;
+  --color-surface-variant: var(--background) !important;
+  --color-on-surface: var(--foreground) !important;
+  --color-on-surface-2: var(--muted-foreground) !important;
+  --color-primary: var(--primary) !important;
+  --color-secondary: var(--secondary) !important;
+  --color-success: var(--accent) !important;
+  --color-warning: 45 100% 50%;
+  --color-error: var(--destructive) !important;
+
+  --rounded-sm: 4px !important;
+  --rounded-md: 8px !important;
+  --rounded-lg: 12px !important;
+  --rounded-full: 9999px !important;
+}
+
+.dark {
+  --background: #0d0d0d !important;
+  --foreground: #ffffff !important;
+  --card: #1a1a1a !important;
+  --card-foreground: #ffffff !important;
+  --popover: #1a1a1a !important;
+  --popover-foreground: #ffffff !important;
+  --primary: #ffa500 !important;
+  --primary-foreground: 222.2 47.4% 11.2%;
+  --secondary: #4a4a4a !important;
+  --secondary-foreground: 210 40% 98%;
+  --muted: 217.2 32.6% 17.5%;
+  --muted-foreground: #b0b0b0 !important;
+  --accent: #33ff33 !important;
+  --accent-foreground: 210 40% 98%;
+  --destructive: #ff3333 !important;
+  --destructive-foreground: 210 40% 98%;
+  --border: 217.2 32.6% 17.5%;
+  --input: 217.2 32.6% 17.5%;
+  --ring: 32 100% 50%;
+
+  /* 画布配色映射 (暗色主题) */
+  --color-surface: var(--card) !important;
+  --color-surface-variant: var(--background) !important;
+  --color-on-surface: var(--foreground) !important;
+  --color-on-surface-2: var(--muted-foreground) !important;
+  --color-primary: var(--primary) !important;
+  --color-secondary: var(--secondary) !important;
+  --color-success: var(--accent) !important;
+  --color-warning: 45 100% 50%;
+  --color-error: var(--destructive) !important;
+  --radius: 8px !important;
+  --rounded-sm: 4px !important;
+  --rounded-md: 8px !important;
+  --rounded-lg: 12px !important;
+  --rounded-full: 9999px !important;
+}
+
+* {
+  border-color: var(--border);
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+}

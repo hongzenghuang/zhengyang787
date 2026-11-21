@@ -1,0 +1,1165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Boeing 787-10 Flight Simulator</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Courier New', 'Consolas', monospace; background: #0d0d0d; color: #e6e6e6; overflow: hidden; width: 100vw; height: 100vh; }
+
+.root { display: flex; flex-direction: column; width: 100%; height: 100vh; position: relative; }
+
+/* Background */
+.bg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 0;
+  background: linear-gradient(180deg, #1a3a5c 0%, #4a8abf 30%, #87ceeb 50%, #b8d4e3 65%, #6b8f5e 70%, #4a6b3a 100%); }
+.bg::after { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  background: linear-gradient(180deg, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.05) 40%, rgba(0,0,0,0.3) 100%); }
+
+.layout { position: relative; z-index: 1; display: flex; flex-direction: column; width: 100%; height: 100%; }
+
+/* Alert bar */
+.alert-bar { display: flex; align-items: center; justify-content: space-between; height: 36px; padding: 0 20px;
+  background: rgba(26,26,26,0.9); border-bottom: 1px solid #4a4a4a; }
+.alert-left { display: flex; align-items: center; gap: 12px; }
+.alert-dot { width: 8px; height: 8px; border-radius: 50%; }
+.dot-ok { background: #33ff33; box-shadow: 0 0 6px #33ff33; }
+.dot-warn { background: #ffa500; box-shadow: 0 0 6px #ffa500; }
+.dot-danger { background: #ff3333; box-shadow: 0 0 6px #ff3333; animation: blink 0.5s infinite; }
+@keyframes blink { 50% { opacity: 0.3; } }
+.alert-text { font-size: 11px; letter-spacing: 1px; text-transform: uppercase; }
+.alert-ok { color: #33ff33; }
+.alert-warn { color: #ffa500; }
+.alert-danger { color: #ff3333; }
+.alert-right { display: flex; align-items: center; gap: 16px; font-size: 11px; color: #b0b0b0; letter-spacing: 0.5px; }
+.alert-time { color: #ffa500; }
+
+/* Main */
+.main { flex: 1; display: flex; gap: 8px; padding: 8px; min-height: 0; }
+
+/* PFD */
+.pfd { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.pfd-main { flex: 1; display: flex; gap: 6px; min-height: 0; }
+
+/* Airspeed tape */
+.airspeed { width: 80px; background: rgba(26,26,26,0.92); border: 1px solid #4a4a4a; border-radius: 4px;
+  display: flex; flex-direction: column; align-items: center; padding: 8px 0; position: relative; overflow: hidden; }
+.spd-label { font-size: 9px; color: #b0b0b0; letter-spacing: 1px; margin-bottom: 4px; text-transform: uppercase; }
+.spd-tape { flex: 1; width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; }
+.spd-value { font-size: 26px; font-weight: bold; color: #33ff33; text-shadow: 0 0 10px rgba(51,255,51,0.5);
+  line-height: 1; background: rgba(0,0,0,0.88); border: 1.5px solid #33ff33; border-radius: 3px;
+  padding: 3px 6px; z-index: 2; position: relative; min-width: 58px; text-align: center; }
+.spd-unit { font-size: 9px; color: #b0b0b0; margin-top: 3px; }
+.spd-ticks { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column;
+  justify-content: space-between; padding: 6px 0; pointer-events: none; }
+.spd-tick { display: flex; align-items: center; width: 100%; padding: 0 6px; }
+.spd-tick-line { width: 12px; height: 1px; background: #b0b0b0; }
+.spd-tick-num { font-size: 9px; color: #b0b0b0; margin-left: 4px; }
+
+/* Attitude indicator container - SQUARE */
+.attitude { flex: 1; background: #050505; border: 2px solid #4a4a4a; border-radius: 6px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  position: relative; overflow: hidden; min-width: 260px; min-height: 240px; padding: 6px;
+  box-shadow: inset 0 0 24px rgba(0,0,0,0.9), 0 0 10px rgba(255,165,0,0.1); }
+.att-title { position: absolute; top: 6px; left: 8px; font-size: 10px; color: #ffa500;
+  letter-spacing: 1.5px; text-transform: uppercase; z-index: 3; font-weight: bold;
+  text-shadow: 0 0 4px rgba(255,165,0,0.6); }
+/* 绝对定位 + 双向 max 约束：始终保持 1:1 正方形并完整落在容器内，
+   不会被 overflow:hidden 裁掉（canvas 自带 600x600 属性，width/height:auto 保比例） */
+#aiCanvas { position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: auto; height: auto;
+  max-width: calc(100% - 12px); max-height: calc(100% - 12px);
+  display: block; }
+
+/* Altitude tape */
+.altitude { width: 80px; background: rgba(26,26,26,0.92); border: 1px solid #4a4a4a; border-radius: 4px;
+  display: flex; flex-direction: column; align-items: center; padding: 8px 0; position: relative; overflow: hidden; }
+.alt-label { font-size: 9px; color: #b0b0b0; letter-spacing: 1px; margin-bottom: 4px; text-transform: uppercase; }
+.alt-tape { flex: 1; width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; }
+.alt-value { font-size: 19px; font-weight: bold; color: #33ff33; text-shadow: 0 0 10px rgba(51,255,51,0.5);
+  line-height: 1; background: rgba(0,0,0,0.88); border: 1.5px solid #33ff33; border-radius: 3px;
+  padding: 3px 4px; z-index: 2; position: relative; min-width: 62px; text-align: center; }
+.alt-unit { font-size: 9px; color: #b0b0b0; margin-top: 3px; }
+.alt-ticks { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column;
+  justify-content: space-between; padding: 6px 0; pointer-events: none; }
+.alt-tick { display: flex; align-items: center; justify-content: flex-end; width: 100%; padding: 0 6px; }
+.alt-tick-num { font-size: 9px; color: #b0b0b0; margin-right: 4px; }
+.alt-tick-line { width: 12px; height: 1px; background: #b0b0b0; }
+
+/* VSI */
+.vs { width: 52px; background: rgba(26,26,26,0.92); border: 1px solid #4a4a4a; border-radius: 4px;
+  display: flex; flex-direction: column; align-items: center; padding: 6px 0; }
+.vs-label { font-size: 8px; color: #b0b0b0; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 2px; }
+.vs-scale { flex: 1; width: 100%; display: flex; flex-direction: column; justify-content: space-between; align-items: center; padding: 4px 0; }
+.vs-tick { font-size: 8px; color: #b0b0b0; }
+.vs-value { font-size: 16px; font-weight: bold; color: #ffa500; text-shadow: 0 0 8px rgba(255,165,0,0.5); margin-top: 4px; }
+.vs-unit { font-size: 7px; color: #b0b0b0; }
+
+/* Heading */
+.heading { height: 56px; background: rgba(26,26,26,0.92); border: 1px solid #4a4a4a; border-radius: 4px;
+  display: flex; flex-direction: column; align-items: center; padding: 4px 0; position: relative; }
+.hdg-label { font-size: 9px; color: #b0b0b0; letter-spacing: 1px; text-transform: uppercase; }
+.hdg-tape { flex: 1; width: 100%; display: flex; align-items: center; justify-content: center; gap: 24px; overflow: hidden; }
+.hdg-mark { display: flex; flex-direction: column; align-items: center; }
+.hdg-num { font-size: 11px; color: #e6e6e6; font-weight: bold; }
+.hdg-line { width: 1px; height: 6px; background: #b0b0b0; }
+.hdg-line-major { width: 2px; height: 10px; background: #e6e6e6; }
+.hdg-pointer { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); width: 0; height: 0;
+  border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 8px solid #ffa500;
+  filter: drop-shadow(0 0 3px #ffa500); }
+.hdg-value { font-size: 14px; font-weight: bold; color: #ffa500; text-shadow: 0 0 6px rgba(255,165,0,0.5); }
+
+/* Engine panel */
+.engine { width: 220px; display: flex; flex-direction: column; gap: 6px; }
+.eng-panel { background: rgba(26,26,26,0.92); border: 1px solid #4a4a4a; border-radius: 4px; padding: 10px;
+  display: flex; flex-direction: column; }
+.eng-title { font-size: 9px; color: #b0b0b0; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 8px;
+  text-align: center; border-bottom: 1px solid rgba(74,74,74,0.5); padding-bottom: 4px; }
+
+/* N1 gauges */
+.n1-row { display: flex; gap: 10px; justify-content: center; }
+.n1-gauge { display: flex; flex-direction: column; align-items: center; }
+.n1-eng-label { font-size: 8px; color: #ffa500; letter-spacing: 1px; }
+.n1-circle { width: 80px; height: 80px; border-radius: 50%; border: 2px solid #4a4a4a; position: relative;
+  display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(circle, rgba(26,26,26,0.8) 0%, #1a1a1a 100%); }
+.n1-arc { position: absolute; top: 4px; left: 4px; right: 4px; bottom: 4px; border-radius: 50%;
+  border: 3px solid transparent; border-top-color: #33ff33; border-right-color: #33ff33; transform: rotate(-45deg); }
+.n1-val { font-size: 18px; font-weight: bold; color: #33ff33; text-shadow: 0 0 8px rgba(51,255,51,0.5); z-index: 1; }
+.n1-pct { font-size: 8px; color: #b0b0b0; position: absolute; bottom: 10px; }
+.n1-label { font-size: 9px; color: #b0b0b0; margin-top: 4px; }
+
+/* EGT */
+.egt-row { display: flex; gap: 16px; justify-content: center; margin-top: 4px; }
+.egt-item { display: flex; flex-direction: column; align-items: center; }
+.egt-val { font-size: 20px; font-weight: bold; color: #ffa500; text-shadow: 0 0 8px rgba(255,165,0,0.5); }
+.egt-unit { font-size: 8px; color: #b0b0b0; }
+.egt-label { font-size: 8px; color: #b0b0b0; margin-top: 2px; }
+.egt-bar-bg { width: 60px; height: 4px; background: #4a4a4a; border-radius: 2px; margin-top: 4px; }
+.egt-bar { height: 100%; border-radius: 2px; background: #ffa500; box-shadow: 0 0 4px #ffa500; }
+
+/* Fuel flow */
+.ff-row { display: flex; gap: 16px; justify-content: center; margin-top: 4px; }
+.ff-item { display: flex; flex-direction: column; align-items: center; }
+.ff-val { font-size: 16px; font-weight: bold; color: #e6e6e6; }
+.ff-unit { font-size: 8px; color: #b0b0b0; }
+.ff-label { font-size: 8px; color: #b0b0b0; margin-top: 2px; }
+
+/* Engine status */
+.eng-status { display: flex; gap: 12px; justify-content: center; margin-top: 4px; }
+.eng-ind { display: flex; align-items: center; gap: 4px; }
+.eng-ind-dot { width: 6px; height: 6px; border-radius: 50%; background: #4a4a4a; }
+.eng-ind-on { background: #33ff33; box-shadow: 0 0 4px #33ff33; }
+.eng-ind-label { font-size: 8px; color: #b0b0b0; }
+
+/* Autopilot */
+.ap-panel { background: rgba(26,26,26,0.92); border: 1px solid #4a4a4a; border-radius: 4px; padding: 8px 10px; }
+.ap-title { font-size: 9px; color: #b0b0b0; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 6px; text-align: center; }
+.ap-status { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.ap-btn { padding: 4px 14px; border-radius: 4px; font-size: 11px; font-weight: bold; letter-spacing: 1px; cursor: pointer; border: 1px solid; }
+.ap-on { background: rgba(51,255,51,0.15); border-color: #33ff33; color: #33ff33; text-shadow: 0 0 6px rgba(51,255,51,0.5); }
+.ap-off { background: rgba(74,74,74,0.3); border-color: #4a4a4a; color: #b0b0b0; }
+.ap-modes { display: flex; gap: 6px; margin-top: 6px; justify-content: center; }
+.ap-mode { font-size: 8px; padding: 2px 6px; border-radius: 2px;
+  background: rgba(51,255,51,0.12); color: #33ff33; border: 1px solid rgba(51,255,51,0.3); letter-spacing: 0.5px; }
+
+/* Bottom panel */
+.bottom { display: flex; gap: 8px; padding: 8px; height: 110px; }
+.ctrl-panel { flex: 1; background: rgba(26,26,26,0.92); border: 1px solid #4a4a4a; border-radius: 4px;
+  padding: 8px 12px; display: flex; flex-direction: column; }
+.ctrl-title { font-size: 9px; color: #b0b0b0; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 6px; text-align: center; }
+
+/* Flaps */
+.flap-display { display: flex; align-items: center; justify-content: center; gap: 12px; flex: 1; }
+.flap-steps { display: flex; gap: 3px; align-items: flex-end; }
+.flap-step { width: 6px; background: #4a4a4a; border-radius: 1px; }
+.flap-step-active { background: #ffa500; box-shadow: 0 0 4px #ffa500; }
+.flap-angle { font-size: 28px; font-weight: bold; color: #ffa500; text-shadow: 0 0 10px rgba(255,165,0,0.5); }
+.flap-deg { font-size: 12px; color: #b0b0b0; }
+
+/* Throttle */
+.throttle-display { display: flex; align-items: center; justify-content: center; gap: 16px; flex: 1; }
+.throttle-lever { width: 20px; height: 60px; background: #4a4a4a; border-radius: 3px; position: relative; overflow: hidden; }
+.throttle-fill { position: absolute; bottom: 0; left: 0; width: 100%;
+  background: linear-gradient(0deg, #33ff33, rgba(51,255,51,0.6)); border-radius: 3px;
+  box-shadow: 0 0 6px rgba(51,255,51,0.4); }
+.throttle-val { font-size: 22px; font-weight: bold; color: #33ff33; text-shadow: 0 0 8px rgba(51,255,51,0.5); }
+.throttle-pct { font-size: 10px; color: #b0b0b0; }
+.throttle-label { font-size: 8px; color: #b0b0b0; text-align: center; }
+
+/* Gear */
+.gear-display { display: flex; align-items: center; justify-content: center; gap: 20px; flex: 1; }
+.gear-item { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.gear-icon { width: 28px; height: 28px; border-radius: 50%; border: 2px solid #33ff33;
+  display: flex; align-items: center; justify-content: center; }
+.gear-icon svg { color: #33ff33; filter: drop-shadow(0 0 3px #33ff33); }
+.gear-label { font-size: 8px; color: #b0b0b0; letter-spacing: 0.5px; }
+.gear-status { font-size: 10px; color: #33ff33; font-weight: bold; letter-spacing: 1px; }
+
+/* Key hints */
+.key-hints { position: fixed; bottom: 8px; right: 8px; z-index: 10; background: rgba(0,0,0,0.85);
+  border: 1px solid #4a4a4a; border-radius: 6px; padding: 10px 14px; font-size: 10px; color: #b0b0b0;
+  line-height: 1.8; pointer-events: none; }
+.key-hints kbd { display: inline-block; background: #333; border: 1px solid #555; border-radius: 3px;
+  padding: 1px 5px; font-size: 10px; color: #ffa500; font-family: inherit; min-width: 18px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="root" id="app">
+  <div class="bg"></div>
+  <div class="layout">
+
+    <!-- Alert bar -->
+    <div class="alert-bar">
+      <div class="alert-left">
+        <div class="alert-dot" id="alertDot"></div>
+        <span class="alert-text" id="alertText"></span>
+        <div class="alert-dot dot-warn" id="apDot" style="display:none"></div>
+        <span class="alert-text alert-warn" id="apText" style="display:none">AUTOPILOT ENGAGED</span>
+      </div>
+      <div class="alert-right">
+        <span>BOEING 787-10</span><span>|</span>
+        <span id="flightLevel">FL0</span><span>|</span>
+        <span class="alert-time" id="utcTime">00:00:00 UTC</span>
+      </div>
+    </div>
+
+    <!-- Main area -->
+    <div class="main">
+      <!-- PFD -->
+      <div class="pfd">
+        <div class="pfd-main">
+          <!-- Airspeed -->
+          <div class="airspeed">
+            <span class="spd-label">AIRSPEED</span>
+            <div class="spd-tape">
+              <div class="spd-ticks" id="spdTicks"></div>
+              <div class="spd-value" id="spdValue">0</div>
+              <div class="spd-unit">KIAS</div>
+            </div>
+          </div>
+
+          <!-- Attitude -->
+          <div class="attitude">
+            <span class="att-title">ATTITUDE</span>
+            <canvas id="aiCanvas" width="600" height="600"></canvas>
+          </div>
+
+          <!-- Altitude -->
+          <div class="altitude">
+            <span class="alt-label">ALTITUDE</span>
+            <div class="alt-tape">
+              <div class="alt-ticks" id="altTicks"></div>
+              <div class="alt-value" id="altValue">0</div>
+              <div class="alt-unit">FT</div>
+            </div>
+          </div>
+
+          <!-- VSI -->
+          <div class="vs">
+            <span class="vs-label">V/S</span>
+            <div class="vs-scale">
+              <span class="vs-tick">+2</span>
+              <span class="vs-tick">+1</span>
+              <span class="vs-tick" style="color:#e6e6e6;font-weight:bold">0</span>
+              <span class="vs-tick">-1</span>
+              <span class="vs-tick">-2</span>
+            </div>
+            <div class="vs-value" id="vsValue">0</div>
+            <div class="vs-unit">FPM</div>
+          </div>
+        </div>
+
+        <!-- Heading -->
+        <div class="heading">
+          <span class="hdg-label">HEADING</span>
+          <div class="hdg-tape" id="hdgTape"></div>
+          <div class="hdg-pointer"></div>
+        </div>
+      </div>
+
+      <!-- Engine panel -->
+      <div class="engine">
+        <div class="eng-panel">
+          <div class="eng-title">N1 RPM</div>
+          <div class="n1-row">
+            <div class="n1-gauge">
+              <span class="n1-eng-label">ENG 1</span>
+              <div class="n1-circle">
+                <div class="n1-arc" id="n1Arc1"></div>
+                <span class="n1-val" id="n1Val1">0.0</span>
+                <span class="n1-pct">%</span>
+              </div>
+              <span class="n1-label">LEFT</span>
+            </div>
+            <div class="n1-gauge">
+              <span class="n1-eng-label">ENG 2</span>
+              <div class="n1-circle">
+                <div class="n1-arc" id="n1Arc2"></div>
+                <span class="n1-val" id="n1Val2">0.0</span>
+                <span class="n1-pct">%</span>
+              </div>
+              <span class="n1-label">RIGHT</span>
+            </div>
+          </div>
+          <div class="eng-status">
+            <div class="eng-ind"><div class="eng-ind-dot" id="eng1Dot"></div><span class="eng-ind-label" id="eng1Label">ENG 1 OFF</span></div>
+            <div class="eng-ind"><div class="eng-ind-dot" id="eng2Dot"></div><span class="eng-ind-label" id="eng2Label">ENG 2 OFF</span></div>
+          </div>
+        </div>
+
+        <div class="eng-panel">
+          <div class="eng-title">EGT TEMP</div>
+          <div class="egt-row">
+            <div class="egt-item">
+              <span class="egt-val" id="egtVal1">20</span>
+              <span class="egt-unit">°C</span>
+              <span class="egt-label">ENG 1</span>
+              <div class="egt-bar-bg"><div class="egt-bar" id="egtBar1" style="width:2%"></div></div>
+            </div>
+            <div class="egt-item">
+              <span class="egt-val" id="egtVal2">20</span>
+              <span class="egt-unit">°C</span>
+              <span class="egt-label">ENG 2</span>
+              <div class="egt-bar-bg"><div class="egt-bar" id="egtBar2" style="width:2%"></div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="eng-panel">
+          <div class="eng-title">FUEL FLOW</div>
+          <div class="ff-row">
+            <div class="ff-item">
+              <span class="ff-val" id="ffVal1">0</span>
+              <span class="ff-unit">KG/HR</span>
+              <span class="ff-label">ENG 1</span>
+            </div>
+            <div class="ff-item">
+              <span class="ff-val" id="ffVal2">0</span>
+              <span class="ff-unit">KG/HR</span>
+              <span class="ff-label">ENG 2</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="ap-panel">
+          <div class="ap-title">AUTOPILOT</div>
+          <div class="ap-status">
+            <div class="ap-btn ap-off" id="apBtn">A/P OFF</div>
+          </div>
+          <div class="ap-modes" id="apModes" style="display:none">
+            <span class="ap-mode" id="apSpd">SPD 0</span>
+            <span class="ap-mode" id="apHdg">HDG 270</span>
+            <span class="ap-mode" id="apAlt">ALT 0</span>
+            <span class="ap-mode">VNAV</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom panel -->
+    <div class="bottom">
+      <div class="ctrl-panel">
+        <div class="ctrl-title">FLAPS</div>
+        <div class="flap-display">
+          <div class="flap-steps" id="flapSteps"></div>
+          <div>
+            <span class="flap-angle" id="flapAngle">0</span>
+            <span class="flap-deg">°</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="ctrl-panel">
+        <div class="ctrl-title">THROTTLE</div>
+        <div class="throttle-display">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:2px">
+            <div class="throttle-lever"><div class="throttle-fill" id="thrFill1" style="height:0%"></div></div>
+            <span class="throttle-label">THR 1</span>
+          </div>
+          <div>
+            <span class="throttle-val" id="thrVal">0</span>
+            <span class="throttle-pct">%</span>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:2px">
+            <div class="throttle-lever"><div class="throttle-fill" id="thrFill2" style="height:0%"></div></div>
+            <span class="throttle-label">THR 2</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="ctrl-panel">
+        <div class="ctrl-title">LANDING GEAR</div>
+        <div class="gear-display">
+          <div class="gear-item">
+            <div class="gear-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg></div>
+            <span class="gear-label">NOSE</span>
+            <span class="gear-status" id="gearNose">DOWN</span>
+          </div>
+          <div class="gear-item">
+            <div class="gear-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg></div>
+            <span class="gear-label">LEFT</span>
+            <span class="gear-status" id="gearLeft">DOWN</span>
+          </div>
+          <div class="gear-item">
+            <div class="gear-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg></div>
+            <span class="gear-label">RIGHT</span>
+            <span class="gear-status" id="gearRight">DOWN</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Key hints overlay -->
+<div class="key-hints">
+  <kbd>1</kbd><kbd>2</kbd> Engine &nbsp;
+  <kbd>W</kbd><kbd>S</kbd> Throttle &nbsp;
+  <kbd>↑</kbd><kbd>↓</kbd> Pitch &nbsp;
+  <kbd>←</kbd><kbd>→</kbd> Roll &nbsp;
+  <kbd>[</kbd><kbd>]</kbd> Flaps &nbsp;
+  <kbd>P</kbd> Autopilot &nbsp;
+  <kbd>G</kbd> Gear
+</div>
+
+<script>
+// ===== Flight State =====
+const state = {
+  altitude: 0, pitch: 0, roll: 0, heading: 270,
+  airspeed: 0, verticalSpeed: 0,
+  throttle: 0, flaps: 0,
+  engine1: { running: false, n1: 0, egt: 20, fuelFlow: 0 },
+  engine2: { running: false, n1: 0, egt: 20, fuelFlow: 0 },
+  autopilot: { active: false, targetAirspeed: 0, targetAltitude: 0, targetHeading: 270 },
+  gearDown: true,
+  alerts: []
+};
+
+// ===== Physics Constants (Boeing 787-10, 标定至真实起飞性能) =====
+const AIR_DENSITY_SL = 1.225;   // kg/m³ 海平面空气密度
+const WING_AREA = 325;          // m²   787-10 参考翼面积
+const MASS = 180000;            // kg   典型起飞重量
+const MAX_THRUST = 700000;      // N    双发合计可用推力（GEnx-1B ≈ 2×330kN）
+const CL_BASE = 1.15;           // 基础升力系数（襟翼 0）
+const CD_BASE = 0.025;          // 基础阻力系数（干净构型）
+const FLAP_CL_BONUS = 0.35;     // 襟翼每 10° 增加的升力系数
+const FLAP_CD_PENALTY = 0.0022; // 襟翼每 1° 增加的阻力系数
+const GEAR_CD = 0.015;          // 起落架放下的额外阻力
+const KNOTS_TO_MS = 0.514444;
+const FT_TO_M = 0.3048;
+const DEG_TO_RAD = Math.PI / 180;
+const G = 9.81;
+const MAX_CLIMB_FPM = 6000;     // 爬升率上限（保护数值稳定）
+
+// 当前构型的失速速度（节）—— 随襟翼/俯仰动态变化
+function stallSpeed() {
+  const cl = CL_BASE + (state.flaps / 10) * FLAP_CL_BONUS + Math.max(0, state.pitch) * 0.012;
+  const w = MASS * G;
+  const v = Math.sqrt((2 * w) / (AIR_DENSITY_SL * WING_AREA * Math.max(0.3, cl)));
+  return v / KNOTS_TO_MS;
+}
+
+// ===== Keyboard =====
+const keys = new Set();
+window.addEventListener('keydown', e => {
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+  keys.add(e.key);
+
+  switch(e.key) {
+    case '1': state.engine1.running = !state.engine1.running; break;
+    case '2': state.engine2.running = !state.engine2.running; break;
+    case 'p': case 'P':
+      state.autopilot.active = !state.autopilot.active;
+      if (state.autopilot.active) {
+        state.autopilot.targetAirspeed = state.airspeed;
+        state.autopilot.targetAltitude = state.altitude;
+        state.autopilot.targetHeading = state.heading;
+      }
+      break;
+    case '[': state.flaps = Math.max(0, state.flaps - 5); break;
+    case ']': state.flaps = Math.min(30, state.flaps + 5); break;
+    case 'g': case 'G': state.gearDown = !state.gearDown; break;
+  }
+});
+window.addEventListener('keyup', e => { keys.delete(e.key); });
+
+// ===== Continuous key handling (50ms interval) =====
+setInterval(() => {
+  if (keys.has('ArrowUp')) state.pitch = Math.min(30, state.pitch + 1.5);
+  if (keys.has('ArrowDown')) state.pitch = Math.max(-30, state.pitch - 1.5);
+  if (keys.has('ArrowLeft')) state.roll = Math.max(-45, state.roll - 3);
+  if (keys.has('ArrowRight')) state.roll = Math.min(45, state.roll + 3);
+  if (keys.has('w') || keys.has('W')) state.throttle = Math.min(100, state.throttle + 2);
+  if (keys.has('s') || keys.has('S')) state.throttle = Math.max(0, state.throttle - 2);
+}, 50);
+
+// ===== PID Controller =====
+const pidState = {
+  speed: { integral: 0, lastError: 0 },
+  altitude: { integral: 0, lastError: 0 },
+  heading: { integral: 0, lastError: 0 }
+};
+
+function pid(error, dt, s, kp, ki, kd) {
+  const p = kp * error;
+  s.integral += error * dt;
+  s.integral = Math.max(-100, Math.min(100, s.integral));
+  const i = ki * s.integral;
+  const d = kd * ((error - s.lastError) / dt);
+  s.lastError = error;
+  return p + i + d;
+}
+
+// ===== Physics Update =====
+function updatePhysics(dt) {
+  const dtS = Math.max(0.001, dt / 1000);
+  const altM = state.altitude * FT_TO_M;
+  const airDensity = AIR_DENSITY_SL * Math.exp(-altM / 8500);
+  const airspeedMS = state.airspeed * KNOTS_TO_MS;
+  const q = 0.5 * airDensity * airspeedMS * airspeedMS;   // 动压
+
+  // 升力：襟翼 + 迎角（用 pitch 近似）
+  const cl = CL_BASE + (state.flaps / 10) * FLAP_CL_BONUS + state.pitch * 0.012;
+  const lift = q * WING_AREA * cl;
+
+  // 阻力：基础 + 襟翼 + 起落架 + 诱导阻力 + 侧滑
+  const clClean = Math.max(0, cl - CL_BASE);
+  const induced = (clClean * clClean) * 0.045;
+  const cd = CD_BASE
+    + state.flaps * FLAP_CD_PENALTY
+    + (state.gearDown ? GEAR_CD : 0)
+    + induced
+    + Math.abs(state.roll) * 0.0008;
+  const drag = q * WING_AREA * cd;
+
+  // 推力
+  const engineFactor = (state.engine1.running ? 0.5 : 0) + (state.engine2.running ? 0.5 : 0);
+  const thrust = (state.throttle / 100) * MAX_THRUST * engineFactor;
+  const weight = MASS * G;
+
+  const pitchRad = state.pitch * DEG_TO_RAD;
+  const rollRad = state.roll * DEG_TO_RAD;
+
+  // ===== 航迹角：能量法 =====
+  // 剩余推力决定爬升能力，而不是让垂直速度无限累积
+  const thrustAlong = thrust * Math.cos(pitchRad);
+  const excess = thrustAlong - drag;
+  let sinGamma = excess / weight;
+
+  // 升力不足（接近/低于失速）时强制下沉
+  const liftVertical = lift * Math.cos(rollRad);
+  const liftRatio = liftVertical / weight;
+  if (liftRatio < 1) {
+    const deficit = (1 - liftRatio);
+    sinGamma = Math.min(sinGamma, -deficit * 0.55);
+  }
+  // 滚转会损失升力垂直分量，加剧下沉
+  if (Math.abs(state.roll) > 30 && liftRatio < 1.05) {
+    sinGamma -= (Math.abs(state.roll) - 30) / 180 * 0.1;
+  }
+
+  sinGamma = Math.max(-0.7, Math.min(0.7, sinGamma));
+
+  // 目标垂直速度（fpm）= 空速 × sin(航迹角)
+  const targetVS = (airspeedMS * sinGamma) / FT_TO_M * 60;
+
+  // 一阶惯性平滑，模拟飞机对垂直速度的响应延迟
+  const resp = Math.min(1, dtS * 1.6);
+  state.verticalSpeed += (targetVS - state.verticalSpeed) * resp;
+  state.verticalSpeed = Math.max(-9000, Math.min(MAX_CLIMB_FPM, state.verticalSpeed));
+
+  // ===== 空速：推力 - 阻力 - 重力沿航迹分量 =====
+  const accelH = (thrustAlong - drag - weight * sinGamma) / MASS;
+  state.airspeed = Math.max(0, state.airspeed + (accelH / KNOTS_TO_MS) * dtS);
+
+  // ===== 高度积分 =====
+  state.altitude += (state.verticalSpeed / 60) * dtS;
+
+  // 姿态自然回中
+  state.pitch *= Math.pow(0.985, dtS * 60);
+  state.roll  *= Math.pow(0.975, dtS * 60);
+
+  // 滚转产生转弯
+  if (Math.abs(state.roll) > 2) {
+    const turnRate = G * Math.tan(rollRad) / Math.max(30, airspeedMS); // rad/s
+    state.heading = (state.heading + turnRate * dtS / DEG_TO_RAD) % 360;
+    if (state.heading < 0) state.heading += 360;
+  }
+
+  // 地面约束：在地面时不允许下沉，且需克服静摩擦
+  if (state.altitude <= 0) {
+    state.altitude = 0;
+    if (state.verticalSpeed < 0) state.verticalSpeed = 0;
+    // 地面滚阻
+    if (state.airspeed > 0) {
+      state.airspeed = Math.max(0, state.airspeed - 0.35 * dtS * 6);
+    }
+    if (state.airspeed < 0.3 && state.throttle < 5) state.airspeed = 0;
+  }
+
+  // 升力不足时无法离地（防止低速"跳"起来）
+  if (state.altitude <= 0 && lift * Math.cos(rollRad) < weight) {
+    state.verticalSpeed = 0;
+  }
+
+  // 引擎参数
+  updateEngine(state.engine1);
+  updateEngine(state.engine2);
+
+  // 自动驾驶
+  if (state.autopilot.active) {
+    const spErr = state.autopilot.targetAirspeed - state.airspeed;
+    state.throttle = Math.max(0, Math.min(100, state.throttle + pid(spErr, dtS, pidState.speed, 0.5, 0.1, 0.05)));
+
+    const altErr = state.autopilot.targetAltitude - state.altitude;
+    state.pitch = Math.max(-30, Math.min(30, state.pitch + pid(altErr, dtS, pidState.altitude, 0.3, 0.05, 0.02)));
+
+    let hdgErr = state.autopilot.targetHeading - state.heading;
+    if (hdgErr > 180) hdgErr -= 360;
+    if (hdgErr < -180) hdgErr += 360;
+    state.roll = Math.max(-45, Math.min(45, state.roll + pid(hdgErr, dtS, pidState.heading, 0.4, 0.08, 0.03)));
+
+    // 失速自动修正
+    const stall = stallSpeed();
+    if (state.airspeed < stall * 1.05) {
+      state.pitch = Math.max(-15, state.pitch - 4 * dtS * 60);
+      state.throttle = Math.min(100, state.throttle + 8 * dtS * 60);
+    }
+    // 超速自动修正
+    if (state.airspeed > 350) {
+      state.pitch = Math.min(15, state.pitch + 2 * dtS * 60);
+      state.throttle = Math.max(0, state.throttle - 6 * dtS * 60);
+    }
+  }
+
+  // 警报
+  state.alerts = [];
+  const stallSpd = stallSpeed();
+  if (state.airspeed > 5 && state.airspeed < stallSpd * 1.08)
+    state.alerts.push({ type: 'STALL', severity: 'WARNING', message: 'STALL WARNING' });
+  if (state.airspeed > 350)
+    state.alerts.push({ type: 'OVERSPEED', severity: 'WARNING', message: 'OVERSPEED WARNING' });
+  if (state.altitude > 0 && state.altitude < 500 && state.verticalSpeed < -1000)
+    state.alerts.push({ type: 'GPWS', severity: 'WARNING', message: 'TERRAIN - PULL UP' });
+  if (!state.engine1.running && state.throttle > 50)
+    state.alerts.push({ type: 'ENGINE', severity: 'WARNING', message: 'ENGINE 1 FAILURE' });
+  if (!state.engine2.running && state.throttle > 50)
+    state.alerts.push({ type: 'ENGINE', severity: 'WARNING', message: 'ENGINE 2 FAILURE' });
+  if (state.autopilot.active && Math.abs(state.altitude - state.autopilot.targetAltitude) > 200)
+    state.alerts.push({ type: 'ALTITUDE', severity: 'CAUTION', message: 'ALTITUDE DEVIATION' });
+}
+
+function updateEngine(eng) {
+  if (!eng.running) {
+    eng.n1 = Math.max(0, eng.n1 - 1.5);
+    eng.egt = Math.max(20, eng.egt - 3);
+    eng.fuelFlow = Math.max(0, eng.fuelFlow - 100);
+    return;
+  }
+  const targetN1 = 20 + state.throttle * 0.8;
+  eng.n1 += (targetN1 - eng.n1) * 0.08;
+  eng.n1 = Math.max(0, Math.min(100, eng.n1));
+
+  const targetEgt = 200 + state.throttle * 5;
+  eng.egt += (targetEgt - eng.egt) * 0.04;
+  eng.egt = Math.max(20, Math.min(900, eng.egt));
+
+  const targetFF = state.throttle * 60;
+  eng.fuelFlow += (targetFF - eng.fuelFlow) * 0.08;
+  eng.fuelFlow = Math.max(0, eng.fuelFlow);
+}
+
+// ===== Attitude Indicator Canvas (SQUARE) =====
+// 缓冲区由 HTML 属性固定为 600x600，绘制直接用该坐标系；
+// 显示尺寸交给 CSS（width:100% + height:auto），不测量任何 DOM，避免塌陷/异常。
+const aiCanvas = document.getElementById('aiCanvas');
+const aiCtx = aiCanvas.getContext('2d');
+const AI = 600;                 // 逻辑坐标边长
+let aiW = AI, aiH = AI;
+
+function resizeAI() {
+  // 缓冲区被外部改动时恢复（正常情况下不需要）
+  if (aiCanvas.width !== AI) aiCanvas.width = AI;
+  if (aiCanvas.height !== AI) aiCanvas.height = AI;
+  aiCtx.setTransform(1, 0, 0, 1, 0, 0);
+  aiW = AI; aiH = AI;
+}
+resizeAI();
+
+function drawAttitudeIndicator() {
+  const ctx = aiCtx;
+  if (!ctx) return;
+
+  // 600px 缓冲区 ÷ 300 逻辑坐标 = 2 倍超采样，显示时由 CSS 缩放，天然抗锯齿
+  const S = AI / 300;
+  const W = 300, H = 300;
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, AI, AI);
+  ctx.scale(S, S);
+
+  const cx = W / 2, cy = H / 2;
+  const box = Math.min(W, H) - 46;   // 方形地平线区域边长
+  const half = box / 2;
+  const pxPerDeg = box / 50;         // 50 度俯仰占满整个方框
+
+  // 外框底色
+  ctx.fillStyle = '#0d0d0d';
+  ctx.fillRect(0, 0, W, H);
+
+  const pitchPx = state.pitch * pxPerDeg;
+
+  // ===== 方形地平线区域（随滚转旋转、随俯仰平移）=====
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(cx - half, cy - half, box, box);
+  ctx.clip();
+
+  ctx.translate(cx, cy);
+  ctx.rotate(-state.roll * DEG_TO_RAD);
+
+  // 天空（地平线以上）
+  const sky = ctx.createLinearGradient(0, pitchPx - box, 0, pitchPx);
+  sky.addColorStop(0, '#0b2a4a');
+  sky.addColorStop(0.55, '#2a6cb8');
+  sky.addColorStop(1, '#6db3e8');
+  ctx.fillStyle = sky;
+  ctx.fillRect(-box * 2, pitchPx - box * 2, box * 4, box * 2);
+
+  // 地面（地平线以下）
+  const gnd = ctx.createLinearGradient(0, pitchPx, 0, pitchPx + box);
+  gnd.addColorStop(0, '#a8763a');
+  gnd.addColorStop(0.45, '#7a5222');
+  gnd.addColorStop(1, '#3d2810');
+  ctx.fillStyle = gnd;
+  ctx.fillRect(-box * 2, pitchPx, box * 4, box * 2);
+
+  // 地平线
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(-box * 2, pitchPx);
+  ctx.lineTo(box * 2, pitchPx);
+  ctx.stroke();
+
+  // 俯仰刻度
+  ctx.fillStyle = '#ffffff';
+  ctx.strokeStyle = '#ffffff';
+  ctx.font = 'bold 11px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  for (let deg = -30; deg <= 30; deg += 5) {
+    if (deg === 0) continue;
+    const y = pitchPx - deg * pxPerDeg;
+    if (y < -half - 20 || y > half + 20) continue;
+
+    const major = deg % 10 === 0;
+    const lw = major ? box * 0.34 : box * 0.16;
+    ctx.lineWidth = major ? 2 : 1.2;
+    ctx.beginPath();
+    ctx.moveTo(-lw / 2, y);
+    ctx.lineTo(lw / 2, y);
+    ctx.stroke();
+
+    if (major) {
+      const label = deg > 0 ? String(deg) : String(deg);
+      ctx.fillText(label, -lw / 2 - 14, y);
+      ctx.fillText(label, lw / 2 + 14, y);
+    }
+  }
+  ctx.restore();
+
+  // ===== 方框边框 =====
+  ctx.strokeStyle = '#5a5a5a';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(cx - half, cy - half, box, box);
+
+  // 内侧暗角
+  ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(cx - half - 3, cy - half - 3, box + 6, box + 6);
+
+  // ===== 顶部滚转刻度弧 =====
+  ctx.save();
+  ctx.translate(cx, cy);
+  const arcR = half + 14;
+
+  ctx.strokeStyle = '#cfcfcf';
+  const bankAngles = [-60,-45,-30,-20,-10,0,10,20,30,45,60];
+  bankAngles.forEach(deg => {
+    const a = (deg - 90) * DEG_TO_RAD;
+    const major = deg % 30 === 0;
+    const len = major ? 10 : (deg === 0 ? 12 : 6);
+    ctx.lineWidth = major ? 2.5 : 1.5;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a) * arcR, Math.sin(a) * arcR);
+    ctx.lineTo(Math.cos(a) * (arcR + len), Math.sin(a) * (arcR + len));
+    ctx.stroke();
+  });
+
+  // 滚转指针（随滚转移动）
+  ctx.save();
+  ctx.rotate(-state.roll * DEG_TO_RAD);
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.moveTo(0, -arcR + 2);
+  ctx.lineTo(-7, -arcR + 14);
+  ctx.lineTo(7, -arcR + 14);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+
+  // 固定基准三角（顶部）
+  ctx.fillStyle = '#ffa500';
+  ctx.beginPath();
+  ctx.moveTo(0, -arcR - 12);
+  ctx.lineTo(-6, -arcR - 2);
+  ctx.lineTo(6, -arcR - 2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+
+  // ===== 飞机符号（固定）=====
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.strokeStyle = '#ffa500';
+  ctx.fillStyle = '#ffa500';
+  ctx.lineWidth = 4;
+  ctx.lineCap = 'round';
+  ctx.shadowColor = 'rgba(255,165,0,0.7)';
+  ctx.shadowBlur = 6;
+
+  const wingSpan = box * 0.42;
+  // 左翼
+  ctx.beginPath();
+  ctx.moveTo(-wingSpan, 0);
+  ctx.lineTo(-box * 0.11, 0);
+  ctx.stroke();
+  // 右翼
+  ctx.beginPath();
+  ctx.moveTo(box * 0.11, 0);
+  ctx.lineTo(wingSpan, 0);
+  ctx.stroke();
+  // 翼尖下垂
+  ctx.lineWidth = 3.5;
+  ctx.beginPath();
+  ctx.moveTo(-wingSpan, 0); ctx.lineTo(-wingSpan, 9);
+  ctx.moveTo(wingSpan, 0);  ctx.lineTo(wingSpan, 9);
+  ctx.stroke();
+  // 中心点
+  ctx.beginPath();
+  ctx.arc(0, 0, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.restore();
+
+  // ===== 侧滑球 =====
+  ctx.save();
+  ctx.translate(cx, cy + half - 18);
+  const bw = 54, bh = 14;
+
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.strokeStyle = '#cfcfcf';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  const rr = bh / 2;
+  ctx.moveTo(-bw/2 + rr, -bh/2);
+  ctx.lineTo(bw/2 - rr, -bh/2);
+  ctx.quadraticCurveTo(bw/2, -bh/2, bw/2, 0);
+  ctx.quadraticCurveTo(bw/2, bh/2, bw/2 - rr, bh/2);
+  ctx.lineTo(-bw/2 + rr, bh/2);
+  ctx.quadraticCurveTo(-bw/2, bh/2, -bw/2, 0);
+  ctx.quadraticCurveTo(-bw/2, -bh/2, -bw/2 + rr, -bh/2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // 中心参考线
+  ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(-6, -bh/2); ctx.lineTo(-6, bh/2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(6, -bh/2);  ctx.lineTo(6, bh/2);  ctx.stroke();
+
+  // 球
+  const ballOff = Math.max(-bw/2 + 6, Math.min(bw/2 - 6, Math.sin(state.roll * DEG_TO_RAD) * (bw/2 - 6)));
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.arc(ballOff, 0, 5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  // ===== 数字读数（俯仰/滚转）=====
+  ctx.save();
+  ctx.fillStyle = '#33ff33';
+  ctx.font = 'bold 12px "Courier New", monospace';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText('PITCH ' + state.pitch.toFixed(1) + '\u00B0', 8, H - 34);
+  ctx.textAlign = 'right';
+  ctx.fillText('ROLL ' + state.roll.toFixed(1) + '\u00B0', W - 8, H - 34);
+  ctx.restore();
+}
+
+// ===== UI Update (cached DOM refs + change detection) =====
+const $ = id => document.getElementById(id);
+const el = {
+  alertDot: $('alertDot'), alertText: $('alertText'),
+  apDot: $('apDot'), apText: $('apText'),
+  flightLevel: $('flightLevel'), utcTime: $('utcTime'),
+  spdValue: $('spdValue'), spdTicks: $('spdTicks'),
+  altValue: $('altValue'), altTicks: $('altTicks'),
+  vsValue: $('vsValue'), hdgTape: $('hdgTape'),
+  n1Arc1: $('n1Arc1'), n1Arc2: $('n1Arc2'),
+  n1Val1: $('n1Val1'), n1Val2: $('n1Val2'),
+  eng1Dot: $('eng1Dot'), eng2Dot: $('eng2Dot'),
+  eng1Label: $('eng1Label'), eng2Label: $('eng2Label'),
+  egtVal1: $('egtVal1'), egtVal2: $('egtVal2'),
+  egtBar1: $('egtBar1'), egtBar2: $('egtBar2'),
+  ffVal1: $('ffVal1'), ffVal2: $('ffVal2'),
+  apBtn: $('apBtn'), apModes: $('apModes'),
+  apSpd: $('apSpd'), apHdg: $('apHdg'), apAlt: $('apAlt'),
+  flapAngle: $('flapAngle'), flapSteps: $('flapSteps'),
+  thrVal: $('thrVal'), thrFill1: $('thrFill1'), thrFill2: $('thrFill2'),
+  gearNose: $('gearNose'), gearLeft: $('gearLeft'), gearRight: $('gearRight')
+};
+
+// 上次渲染值缓存，避免无谓的 DOM 写入
+const last = {};
+function setIf(key, node, prop, val) {
+  if (last[key] === val) return;
+  last[key] = val;
+  node[prop] = val;
+}
+
+// 预建襟翼刻度（只建一次）
+const FLAP_ANGLES = [0, 5, 10, 15, 20, 25, 30];
+const FLAP_HEIGHTS = [8, 14, 20, 26, 32, 38, 44];
+FLAP_ANGLES.forEach((a, i) => {
+  const d = document.createElement('div');
+  d.className = 'flap-step';
+  d.style.height = FLAP_HEIGHTS[i] + 'px';
+  el.flapSteps.appendChild(d);
+});
+const flapStepNodes = Array.from(el.flapSteps.children);
+
+// 预建空速/高度/航向刻度节点（只建一次，之后只改文字）
+const SPD_OFFSETS = [60, 40, 20, 0, -20, -40, -60];
+const spdTickNodes = SPD_OFFSETS.map(() => {
+  const row = document.createElement('div');
+  row.className = 'spd-tick';
+  row.innerHTML = '<div class="spd-tick-line"></div><span class="spd-tick-num"></span>';
+  el.spdTicks.appendChild(row);
+  return row.querySelector('.spd-tick-num');
+});
+
+const ALT_OFFSETS = [1500, 1000, 500, 0, -500, -1000, -1500];
+const altTickNodes = ALT_OFFSETS.map(() => {
+  const row = document.createElement('div');
+  row.className = 'alt-tick';
+  row.innerHTML = '<span class="alt-tick-num"></span><div class="alt-tick-line"></div>';
+  el.altTicks.appendChild(row);
+  return row.querySelector('.alt-tick-num');
+});
+
+const HDG_OFFSETS = [-30, -20, -10, 0, 10, 20, 30];
+const hdgNodes = HDG_OFFSETS.map(off => {
+  const m = document.createElement('div');
+  m.className = 'hdg-mark';
+  const isCur = off === 0;
+  m.innerHTML = isCur
+    ? '<span class="hdg-value"></span><div class="hdg-line-major" style="background:#ffa500"></div>'
+    : '<span class="hdg-num"></span><div class="' + (Math.abs(off) % 10 === 0 ? 'hdg-line-major' : 'hdg-line') + '"></div>';
+  el.hdgTape.appendChild(m);
+  return m.querySelector('span');
+});
+
+function hdgLabel(h) {
+  h = ((Math.round(h) % 360) + 360) % 360;
+  if (h === 0) return 'N';
+  if (h === 90) return 'E';
+  if (h === 180) return 'S';
+  if (h === 270) return 'W';
+  return String(h).padStart(3, '0');
+}
+
+let uiFrame = 0;
+function updateUI() {
+  const s = state;
+
+  // 低频内容（每 30 帧 ≈ 0.5s 更新一次）
+  const slow = (uiFrame++ % 30) === 0;
+
+  // ---- 警报条 ----
+  if (slow) {
+    if (s.alerts.length > 0) {
+      const worst = s.alerts.find(a => a.severity === 'WARNING') || s.alerts[0];
+      const cls = 'alert-dot ' + (worst.severity === 'WARNING' ? 'dot-danger' : 'dot-warn');
+      if (el.alertDot.className !== cls) el.alertDot.className = cls;
+      const tcls = 'alert-text ' + (worst.severity === 'WARNING' ? 'alert-danger' : 'alert-warn');
+      if (el.alertText.className !== tcls) el.alertText.className = tcls;
+      setIf('alertMsg', el.alertText, 'textContent', worst.message);
+    } else {
+      if (el.alertDot.className !== 'alert-dot dot-ok') el.alertDot.className = 'alert-dot dot-ok';
+      if (el.alertText.className !== 'alert-text alert-ok') el.alertText.className = 'alert-text alert-ok';
+      setIf('alertMsg', el.alertText, 'textContent', 'ALL SYSTEMS NOMINAL');
+    }
+    const apDisp = s.autopilot.active ? '' : 'none';
+    if (el.apDot.style.display !== apDisp) el.apDot.style.display = apDisp;
+    if (el.apText.style.display !== apDisp) el.apText.style.display = apDisp;
+    setIf('fl', el.flightLevel, 'textContent', 'FL' + Math.round(s.altitude / 100));
+    setIf('utc', el.utcTime, 'textContent',
+      new Date().toLocaleTimeString('en-US', { hour12: false }) + ' UTC');
+  }
+
+  // ---- 空速 ----
+  const spd = Math.round(s.airspeed);
+  setIf('spd', el.spdValue, 'textContent', String(spd));
+  const spdQ = Math.round(s.airspeed / 5) * 5;   // 量化到 5 节再重建刻度
+  if (last.spdQ !== spdQ) {
+    last.spdQ = spdQ;
+    for (let i = 0; i < spdTickNodes.length; i++) {
+      spdTickNodes[i].textContent = String(Math.max(0, spdQ + SPD_OFFSETS[i]));
+    }
+  }
+
+  // ---- 高度 ----
+  const alt = Math.round(s.altitude);
+  setIf('alt', el.altValue, 'textContent', alt.toLocaleString());
+  const altQ = Math.round(s.altitude / 100) * 100;
+  if (last.altQ !== altQ) {
+    last.altQ = altQ;
+    for (let i = 0; i < altTickNodes.length; i++) {
+      altTickNodes[i].textContent = Math.max(0, altQ + ALT_OFFSETS[i]).toLocaleString();
+    }
+  }
+
+  // ---- 垂直速度 ----
+  setIf('vs', el.vsValue, 'textContent',
+    (s.verticalSpeed > 0 ? '+' : '') + Math.round(s.verticalSpeed));
+
+  // ---- 航向 ----
+  const hdgQ = Math.round(s.heading / 2) * 2;
+  if (last.hdgQ !== hdgQ) {
+    last.hdgQ = hdgQ;
+    for (let i = 0; i < hdgNodes.length; i++) {
+      hdgNodes[i].textContent = hdgLabel(hdgQ + HDG_OFFSETS[i]);
+    }
+  }
+
+  // ---- 引擎 N1 ----
+  const n1a = -45 + (s.engine1.n1 / 100) * 270;
+  const n1b = -45 + (s.engine2.n1 / 100) * 270;
+  setIf('n1arc1', el.n1Arc1.style, 'transform', `rotate(${n1a.toFixed(1)}deg)`);
+  setIf('n1arc2', el.n1Arc2.style, 'transform', `rotate(${n1b.toFixed(1)}deg)`);
+  setIf('n1v1', el.n1Val1, 'textContent', s.engine1.n1.toFixed(1));
+  setIf('n1v2', el.n1Val2, 'textContent', s.engine2.n1.toFixed(1));
+
+  if (slow) {
+    const c1 = 'eng-ind-dot' + (s.engine1.running ? ' eng-ind-on' : '');
+    const c2 = 'eng-ind-dot' + (s.engine2.running ? ' eng-ind-on' : '');
+    if (el.eng1Dot.className !== c1) el.eng1Dot.className = c1;
+    if (el.eng2Dot.className !== c2) el.eng2Dot.className = c2;
+    setIf('e1l', el.eng1Label, 'textContent', 'ENG 1 ' + (s.engine1.running ? 'RUN' : 'OFF'));
+    setIf('e2l', el.eng2Label, 'textContent', 'ENG 2 ' + (s.engine2.running ? 'RUN' : 'OFF'));
+  }
+
+  // ---- EGT ----
+  setIf('egt1', el.egtVal1, 'textContent', String(Math.round(s.engine1.egt)));
+  setIf('egt2', el.egtVal2, 'textContent', String(Math.round(s.engine2.egt)));
+  setIf('egtb1', el.egtBar1.style, 'width', Math.min(100, (s.engine1.egt / 900) * 100).toFixed(1) + '%');
+  setIf('egtb2', el.egtBar2.style, 'width', Math.min(100, (s.engine2.egt / 900) * 100).toFixed(1) + '%');
+
+  // ---- 燃油流量 ----
+  if (slow) {
+    setIf('ff1', el.ffVal1, 'textContent', Math.round(s.engine1.fuelFlow).toLocaleString());
+    setIf('ff2', el.ffVal2, 'textContent', Math.round(s.engine2.fuelFlow).toLocaleString());
+  }
+
+  // ---- 自动驾驶 ----
+  if (s.autopilot.active) {
+    if (el.apBtn.className !== 'ap-btn ap-on') el.apBtn.className = 'ap-btn ap-on';
+    setIf('apbtn', el.apBtn, 'textContent', 'A/P ON');
+    if (el.apModes.style.display !== '') el.apModes.style.display = '';
+    if (slow) {
+      setIf('apspd', el.apSpd, 'textContent', 'SPD ' + Math.round(s.autopilot.targetAirspeed));
+      setIf('aphdg', el.apHdg, 'textContent', 'HDG ' + Math.round(s.autopilot.targetHeading));
+      setIf('apalt', el.apAlt, 'textContent', 'ALT ' + Math.round(s.autopilot.targetAltitude));
+    }
+  } else {
+    if (el.apBtn.className !== 'ap-btn ap-off') el.apBtn.className = 'ap-btn ap-off';
+    setIf('apbtn', el.apBtn, 'textContent', 'A/P OFF');
+    if (el.apModes.style.display !== 'none') el.apModes.style.display = 'none';
+  }
+
+  // ---- 襟翼 ----
+  setIf('flap', el.flapAngle, 'textContent', String(s.flaps));
+  if (last.flaps !== s.flaps) {
+    last.flaps = s.flaps;
+    for (let i = 0; i < flapStepNodes.length; i++) {
+      const on = s.flaps >= FLAP_ANGLES[i];
+      const want = 'flap-step' + (on ? ' flap-step-active' : '');
+      if (flapStepNodes[i].className !== want) flapStepNodes[i].className = want;
+    }
+  }
+
+  // ---- 油门 ----
+  const thr = Math.round(s.throttle);
+  setIf('thr', el.thrVal, 'textContent', String(thr));
+  setIf('thrf1', el.thrFill1.style, 'height', thr + '%');
+  setIf('thrf2', el.thrFill2.style, 'height', thr + '%');
+
+  // ---- 起落架 ----
+  if (slow) {
+    const g = s.gearDown ? 'DOWN' : 'UP';
+    setIf('gn', el.gearNose, 'textContent', g);
+    setIf('gl', el.gearLeft, 'textContent', g);
+    setIf('gr', el.gearRight, 'textContent', g);
+  }
+}
+
+// ===== Main Loop =====
+let lastTime = Date.now();
+let loopStarted = false;
+let errCount = 0;
+
+function loop() {
+  // 关键：无论本帧是否出错，都必须重新排帧，否则界面会永久冻结
+  try {
+    const now = Date.now();
+    const dt = Math.min(now - lastTime, 100); // cap at 100ms
+    lastTime = now;
+
+    updatePhysics(dt);
+    drawAttitudeIndicator();
+    updateUI();
+  } catch (e) {
+    // 单帧失败不影响后续帧；仅在前几次打印，避免刷屏
+    if (errCount++ < 3 && typeof console !== 'undefined') {
+      console.error('[sim] frame error:', e);
+    }
+  }
+  requestAnimationFrame(loop);
+}
+
+function startLoop() {
+  if (loopStarted) return;
+  loopStarted = true;
+  try { resizeAI(); } catch (e) {}
+  lastTime = Date.now();
+  requestAnimationFrame(loop);
+}
+
+// 布局稳定后启动；若 load 已触发则立即启动
+if (document.readyState === 'complete') {
+  startLoop();
+} else {
+  window.addEventListener('load', startLoop);
+  // 兜底：即使 load 迟迟不触发也保证启动
+  setTimeout(startLoop, 300);
+}
+</script>
+</body>
+</html>
