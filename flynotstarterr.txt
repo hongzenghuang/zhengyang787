@@ -1,0 +1,150 @@
+================================================================================
+"开始飞行"点击无反应问题排查报告
+================================================================================
+
+日期：2026-11-22
+现象：预览环境中，启动屏「开始飞行」按钮点击无反应，无法进入驾驶舱
+结论：预览环境无法执行 Turbopack dev 模式的 chunk（currentScript 缺失），
+      导致 React 永远无法挂载；页面只是 SSR 输出的静态骨架。
+      解法 = 改用生产模式启动（next build + next start）。
+
+--------------------------------------------------------------------------------
+一、最终根因
+--------------------------------------------------------------------------------
+
+预览环境（沙箱预览代理链路）中执行 Turbopack【dev 模式】chunk 时，
+chunk 内部依赖的 document.currentScript 为 null（环境对 script 的加载/
+执行方式做了处理，推测改写为 module 或内联方式执行，均会导致
+currentScript 为空）。
+
+Turbopack dev runtime 启动时用 document.currentScript 定位 chunk 路径，
+拿不到时执行其内部检查：
+
+    Error: chunk path empty but not in a worker
+
+页面共 17 个 chunk，16 个全部抛此错误（仅 polyfill 幸免，它不依赖该机制）。
+于是：
+
+  - SSR（服务端渲染）正常 → 页面外观完整（启动屏、参数卡片、按钮都在）
+  - 客户端 React 永远挂载失败 → 无事件绑定、无动画（飞机静止、步骤不轮换）
+  - 「开始飞行」按钮 onclick 从未绑定 → 点击无反应
+
+关键证据（探针实测，浏览器端）：
+  1. L2 React挂载: ✗ 未挂载（React useEffect 从未运行，诊断面板全程
+     停留在 SSR 初始状态）
+  2. 飞机动画完全静止、教程步骤只高亮第一步 → rAF 循环没跑
+  3. 手动 fetch 全部 chunk：[200 application/javascript] 且内容正确
+     → 网络层正常
+  4. 手动 eval 逐个执行 chunk：16/17 全部抛
+     "Error: chunk path empty but not in a worker"
+  5. CSP meta 标签：无；CSP 响应头：无；script onerror：0 个
+     → 排除 CSP 拦截
+  6. 内联 <script> 可执行（探针 L0a ✅）；动态注入的外部 JS
+     （public/diag.js）可执行（L0b ✅）→ 排除"环境禁 JS"
+
+--------------------------------------------------------------------------------
+二、排查过程（时间线）
+--------------------------------------------------------------------------------
+
+阶段 1：常规怀疑 —— 全部排除
+  - 代码逻辑：jsdom + createRoot 渲染 / hydrateRoot 真实 hydration /
+    @napi-rs/canvas 真实 Canvas 绘制，三层验证全部通过，点击切换逻辑正常
+  - dev server：SSR 输出完整、bundle 全部 200、TypeScript 严格模式零错误
+  - bundle 内容：SimApp/IntroScreen/FlightDeck/「开始飞行」均在 chunk 中
+  - 响应头：无 CSP、无 X-Frame-Options 等任何限制头；无 middleware
+  - 重启 dev server + 清 .next + 强刷：无效
+
+阶段 2：分层诊断探针（public/diag.js，随内联脚本动态注入）
+  v1：L0a 内联JS / L0b 外部JS 探针
+      → L0a ✅、L0b ✅：环境允许 JS 执行（排除"禁 JS"与 CSP 全禁）
+  v3：fetch 真实 chunk 探针
+      → 三个 chunk 均 [200 application/javascript] + 正确内容：
+        网络层完全正常，焦点转向"执行层"
+  v4：TURBOPACK 全局 / CSP meta / CSP 响应头 / script load-error 捕获
+      → TURBOPACK 存在（chunk 至少执行过注册）；CSP 无；0 失败
+  v5：显示 L0a 收集的运行错误（此前从未展示过）
+      → 0 条错误 + React 容器标记不存在 → "沉默地失败"
+  v6：终极自救探针（fetch 全部 chunk 并按 DOM 顺序手动 eval 执行）
+      → ★ 抓到真凶：16/17 chunk 抛
+        "Error: chunk path empty but not in a worker"
+      → 该错误是 Turbopack dev runtime 的内部检查：
+        chunk 路径取自 document.currentScript，为空且不在 worker 中即抛错
+
+阶段 3：验证与修复
+  - 修复方案：生产模式。生产 bundle 不依赖 document.currentScript、
+    无 Turbopack HMR runtime，无此软肋
+  - 实施：package.json 的 dev 脚本改为 bash scripts/serve.sh
+        （无 .next/BUILD_ID 则先 next build，然后 next start -p 5001）；
+        原 dev 模式保留为 dev:next
+  - 结果：按钮可点、驾驶舱可进入、全部功能可用
+
+--------------------------------------------------------------------------------
+三、衍生问题（已一并修复）
+--------------------------------------------------------------------------------
+
+1. React error #418（hydration mismatch）
+   原因：诊断探针 public/diag.js 往 <body> 末尾动态 append div，
+        而 Next.js App Router 以整个 body 为 hydration 根，
+        多余节点触发 #418（React 自动降级客户端重渲染，功能正常但报错）
+   修复：诊断完成后拆除全部诊断装置（diag.js / Diagnostics 组件 /
+        layout 内联探针 / globals.css 诊断样式 / SimApp 打点），
+        重新构建后 #418 消失
+
+2. 平台 dev watcher 与手动操作的资源竞争（背景事件）
+   - 沙箱平台会自动维持 pnpm run dev 运行（杀掉后自动拉起），
+     多次导致 next build 与 dev 争抢 .next 目录（build 超时）
+   - 顺带发现：环境同时存在两个服务
+        5001  = 本项目；13579 = 平台自带 "Database Tools"（无关）
+   - 对策：把 dev 脚本本身改为生产启动器后，watcher 拉起即生产服务
+
+--------------------------------------------------------------------------------
+四、修复方案存档
+--------------------------------------------------------------------------------
+
+scripts/serve.sh（新增，保留）：
+    #!/bin/bash
+    # 生产服务启动器：无生产构建产物时先构建，然后 next start
+    cd "$(dirname "$0")/.." || exit 1
+    if [ ! -f .next/BUILD_ID ]; then
+      echo "[serve] 未发现生产构建，开始构建..."
+      if ! pnpm run build; then
+        echo "[serve] 构建失败，5 秒后退出（避免快速重启风暴）"
+        sleep 5
+        exit 1
+      fi
+    fi
+    echo "[serve] 启动生产服务器 (端口 5001)"
+    exec npx next start -p 5001
+
+package.json（scripts 变更，保留）：
+    "dev"      : "bash scripts/serve.sh"   ← 平台拉起即生产模式（本环境解法）
+    "dev:next" : "next dev -p 5001"        ← 原开发模式（本地开发用）
+    "build"    : "next build"
+    "start"    : "next start -p 5001"
+
+注意：
+  - 本环境（预览代理）中 dev 模式不可用（currentScript 机制失效），
+    本地开发环境不受影响，可正常使用 dev:next
+  - 若在本环境开发调试：改代码后需 pnpm build 并重启（serve.sh 会
+    在无 BUILD_ID 时自动构建；有旧产物时需先 rm -rf .next 再重启）
+  - 诊断装置已全部移除（diag.js / Diagnostics.tsx / layout 探针 /
+    相关 CSS），如需复现诊断可参考本文件第二节的探针版本说明重建
+
+--------------------------------------------------------------------------------
+五、经验总结
+--------------------------------------------------------------------------------
+
+1. "页面显示正常但无任何交互" = 优先怀疑 hydration/客户端 JS 未执行，
+   而不是组件逻辑本身
+2. SSR 骨架完整会制造"应用正常"的假象，必须验证客户端生命周期
+  （useEffect 是否运行、rAF 动画是否在动）
+3. 诊断工具自身要零依赖：诊断组件若依赖 React，在 React 挂不了时
+   就什么都显示不出来——纯 DOM 探针（内联脚本 + 动态注入的 JS 文件）
+   才能在"全家挂"的环境里工作
+4. 分层二分排查：内联 JS → 外部 JS → 网络请求 → 执行 → React 挂载 →
+   事件绑定，每层一个探针，一次刷新收一层结论
+5. 错误信息要尽早展示：本例中 window.onerror 收集到的关键错误
+   （v6 才暴露）其实一开始就可以直接打到页面上
+6. "chunk path empty but not in a worker" = Turbopack dev runtime 的
+   currentScript 依赖；凡是代理改写 script 执行方式的环境都可能踩中
+================================================================================
