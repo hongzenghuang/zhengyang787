@@ -1,183 +1,73 @@
-import { FlightState, Alert } from './types';
+// 自动驾驶逻辑（AP 接通条件 / 目标捕获 / 控制律）
+import { SimState, AP_LIMITS, clamp, hdgError, stallLimit } from './sim-types';
 
-// 自动驾驶 PID 控制器参数
-const PID_KP_SPEED = 0.5;
-const PID_KI_SPEED = 0.1;
-const PID_KD_SPEED = 0.05;
-
-const PID_KP_ALT = 0.3;
-const PID_KI_ALT = 0.05;
-const PID_KD_ALT = 0.02;
-
-const PID_KP_HDG = 0.4;
-const PID_KI_HDG = 0.08;
-const PID_KD_HDG = 0.03;
-
-interface PIDState {
-  integral: number;
-  lastError: number;
+/** AP 接通前置条件 */
+export function canEngageAP(s: SimState): boolean {
+  return s.eng.every((e) => e.on) && s.ias > 150 && s.alt > 1000;
 }
 
-const pidStates: Record<string, PIDState> = {
-  speed: { integral: 0, lastError: 0 },
-  altitude: { integral: 0, lastError: 0 },
-  heading: { integral: 0, lastError: 0 },
-};
+export const AP_INHIBIT_MSG =
+  'AP INHIBIT · Engines ON, IAS > 150 kt, altitude > 1000 ft required';
 
-function pidController(error: number, dt: number, state: PIDState, kp: number, ki: number, kd: number): number {
-  // 比例项
-  const p = kp * error;
-  
-  // 积分项
-  state.integral += error * dt;
-  state.integral = Math.max(-100, Math.min(100, state.integral)); // 防饱和
-  const i = ki * state.integral;
-  
-  // 微分项
-  const derivative = (error - state.lastError) / dt;
-  state.lastError = error;
-  const d = kd * derivative;
-  
-  return p + i + d;
+/** 接通瞬间捕获当前状态为目标 */
+export function captureTargets(s: SimState): void {
+  s.apTarget = {
+    ias: clamp(Math.round(s.ias / 5) * 5, AP_LIMITS.iasMin, AP_LIMITS.iasMax),
+    alt: clamp(Math.round(s.alt / 500) * 500, AP_LIMITS.altMin, AP_LIMITS.altMax),
+    hdg: Math.round(s.hdg) % 360,
+  };
 }
 
-export function updateAutopilot(state: FlightState, deltaTime: number): Partial<FlightState> {
-  if (!state.autopilot.active) {
-    return {};
+/** 调节 MCP 目标（AP 接通时才有效） */
+export function adjustAPTarget(s: SimState, key: keyof SimState['apTarget'], dir: 1 | -1): void {
+  if (!s.ap) return;
+  if (key === 'hdg') {
+    s.apTarget.hdg = (s.apTarget.hdg + dir * AP_LIMITS.hdgStep + 360) % 360;
+  } else if (key === 'ias') {
+    s.apTarget.ias = clamp(s.apTarget.ias + dir * AP_LIMITS.iasStep, AP_LIMITS.iasMin, AP_LIMITS.iasMax);
+  } else if (key === 'alt') {
+    s.apTarget.alt = clamp(s.apTarget.alt + dir * AP_LIMITS.altStep, AP_LIMITS.altMin, AP_LIMITS.altMax);
   }
-  
-  const dt = deltaTime / 1000;
-  const updates: Partial<FlightState> = {};
-  
-  // 速度控制 (调整油门)
-  const speedError = state.autopilot.targetAirspeed - state.airspeed;
-  const throttleAdjust = pidController(speedError, dt, pidStates.speed, PID_KP_SPEED, PID_KI_SPEED, PID_KD_SPEED);
-  updates.throttle = Math.max(0, Math.min(100, state.throttle + throttleAdjust));
-  
-  // 高度控制 (调整俯仰)
-  const altError = state.autopilot.targetAltitude - state.altitude;
-  const pitchAdjust = pidController(altError, dt, pidStates.altitude, PID_KP_ALT, PID_KI_ALT, PID_KD_ALT);
-  updates.pitch = Math.max(-30, Math.min(30, state.pitch + pitchAdjust));
-  
-  // 航向控制 (调整滚转)
-  let hdgError = state.autopilot.targetHeading - state.heading;
-  // 处理航向环绕
-  if (hdgError > 180) hdgError -= 360;
-  if (hdgError < -180) hdgError += 360;
-  const rollAdjust = pidController(hdgError, dt, pidStates.heading, PID_KP_HDG, PID_KI_HDG, PID_KD_HDG);
-  updates.roll = Math.max(-45, Math.min(45, state.roll + rollAdjust));
-  
-  // 警报修正
-  const alerts: Alert[] = [];
-  
-  // 失速修正
-  if (state.airspeed < 120) {
-    updates.pitch = Math.max(-15, state.pitch - 5); // 推头
-    updates.throttle = Math.min(100, state.throttle + 10); // 加油门
-    alerts.push({
-      type: 'STALL',
-      severity: 'WARNING',
-      message: 'STALL WARNING - AUTOPILOT CORRECTING',
-      active: true,
-      timestamp: Date.now(),
-    });
-  }
-  
-  // 超速修正
-  if (state.airspeed > 350) {
-    updates.pitch = Math.min(15, state.pitch + 3); // 拉杆
-    updates.throttle = Math.max(0, state.throttle - 10); // 减油门
-    alerts.push({
-      type: 'OVERSPEED',
-      severity: 'WARNING',
-      message: 'OVERSPEED WARNING - AUTOPILOT CORRECTING',
-      active: true,
-      timestamp: Date.now(),
-    });
-  }
-  
-  // 高度偏离
-  if (Math.abs(altError) > 200) {
-    alerts.push({
-      type: 'ALTITUDE',
-      severity: 'CAUTION',
-      message: `ALTITUDE DEVIATION ${altError > 0 ? '+' : ''}${Math.round(altError)} FT`,
-      active: true,
-      timestamp: Date.now(),
-    });
-  }
-  
-  updates.alerts = alerts;
-  
-  return updates;
 }
 
-export function checkAlerts(state: FlightState): Alert[] {
-  const alerts: Alert[] = [];
-  
-  // 失速警报
-  if (state.airspeed < 120) {
-    alerts.push({
-      type: 'STALL',
-      severity: 'WARNING',
-      message: 'STALL WARNING',
-      active: true,
-      timestamp: Date.now(),
-    });
-  }
-  
-  // 超速警报
-  if (state.airspeed > 350) {
-    alerts.push({
-      type: 'OVERSPEED',
-      severity: 'WARNING',
-      message: 'OVERSPEED WARNING',
-      active: true,
-      timestamp: Date.now(),
-    });
-  }
-  
-  // 高度偏离警报
-  if (state.autopilot.active && Math.abs(state.altitude - state.autopilot.targetAltitude) > 200) {
-    alerts.push({
-      type: 'ALTITUDE',
-      severity: 'CAUTION',
-      message: 'ALTITUDE DEVIATION',
-      active: true,
-      timestamp: Date.now(),
-    });
-  }
-  
-  // 引擎故障警报
-  if (!state.engine1.running && state.throttle > 50) {
-    alerts.push({
-      type: 'ENGINE',
-      severity: 'WARNING',
-      message: 'ENGINE 1 FAILURE',
-      active: true,
-      timestamp: Date.now(),
-    });
-  }
-  if (!state.engine2.running && state.throttle > 50) {
-    alerts.push({
-      type: 'ENGINE',
-      severity: 'WARNING',
-      message: 'ENGINE 2 FAILURE',
-      active: true,
-      timestamp: Date.now(),
-    });
-  }
-  
-  // 近地警报
-  if (state.altitude < 500 && state.verticalSpeed < -1000) {
-    alerts.push({
-      type: 'GPWS',
-      severity: 'WARNING',
-      message: 'TERRAIN - PULL UP',
-      active: true,
-      timestamp: Date.now(),
-    });
-  }
-  
-  return alerts;
+/** AP 速度控制：估算阻力 → 由速度误差算请求加速度 → 反解目标功率 (0-1) */
+export function apComputeThrottle(s: SimState): number {
+  const speedError = s.apTarget.ias - s.ias;
+  const dragEstimate =
+    s.ias * 0.018 +
+    s.ias * s.ias * 0.00032 +
+    s.flap * 0.65 +
+    (s.gear ? s.ias * 0.012 : 0);
+  const requestedAccel = clamp(speedError * 0.16, -12, 12);
+  return clamp((dragEstimate + requestedAccel / 0.12) / 240, 0, 1);
+}
+
+/** AP 俯仰与坡度目标（含失速 / 超速保护覆盖） */
+export function apComputePitchBank(
+  s: SimState,
+  stall: boolean
+): { pitchTarget: number; bankTarget: number } {
+  let pitchTarget = clamp(
+    (s.apTarget.alt - s.alt) * 0.0015 - s.vsi * 0.00035,
+    -3,
+    8
+  );
+  if (stall) pitchTarget = Math.min(pitchTarget, -2);      // 失速：推头
+  if (s.ias > 340) pitchTarget = Math.max(pitchTarget, 3); // 超速：拉杆
+
+  const bankTarget = clamp(hdgError(s.apTarget.hdg, s.hdg) * 0.8, -25, 25);
+  return { pitchTarget, bankTarget };
+}
+
+/** 反推接通条件 */
+export function canEngageReverse(s: SimState): boolean {
+  return s.alt < 40 && s.gear && s.eng.every((e) => e.on) && !s.ap;
+}
+
+export const REV_INHIBIT_MSG =
+  'REV INHIBIT · Ground, gear down, both engines running, AP off required';
+
+/** 当前是否处于失速 */
+export function isStall(s: SimState): boolean {
+  return s.ias < stallLimit(s.flap);
 }
