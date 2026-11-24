@@ -1,14 +1,20 @@
 'use client';
 
-import type { AlertItem } from '@/lib/sim-types';
+import type { AlertItemPro } from '@/lib/alerts';
 
 interface AlertStripProps {
-  alerts: AlertItem[];
+  alerts: AlertItemPro[];
   normalMsg: string;
   flash: { kind: 'normal' | 'warn' | 'danger'; text: string } | null;
+  onAutoRecover: (fix: AlertItemPro['autoFix']) => void;
 }
 
-export function AlertStrip({ alerts, normalMsg, flash }: AlertStripProps) {
+/**
+ * 警报条：分级警报显示 + AI 自动恢复程序。
+ * - AI 恢复区常驻布局（visibility 显隐），避免警报临界抖动时反复插拔 DOM 引起布局闪动
+ * - 背景色带过渡，等级切换不突跳
+ */
+export function AlertStrip({ alerts, normalMsg, flash, onAutoRecover }: AlertStripProps) {
   let cls = 'alert-strip';
   let text = normalMsg;
 
@@ -21,10 +27,24 @@ export function AlertStrip({ alerts, normalMsg, flash }: AlertStripProps) {
     text = alerts.map((a) => a.text).join('  ·  ');
   }
 
+  const top = alerts[0] || null;
+  const showRecovery = !flash && !!top;
+
   return (
     <div className={cls} id="alertStrip">
       <span className="alert-icon">◆</span>
       <span id="alertText">{text}</span>
+
+      {/* AI 自动恢复程序：常驻布局，visibility 控制，消除布局抖动 */}
+      <span className={'alert-recovery' + (showRecovery ? ' show' : '')}>
+        <span className="recovery-text">{top?.recovery || '\u00A0'}</span>
+        <button
+          className="recovery-btn"
+          type="button"
+          style={{ visibility: top?.autoFix ? 'visible' : 'hidden' }}
+          onClick={() => top?.autoFix && onAutoRecover(top.autoFix)}
+        >⚡ AUTO RECOVER</button>
+      </span>
     </div>
   );
 }

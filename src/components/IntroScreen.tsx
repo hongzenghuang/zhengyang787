@@ -24,6 +24,42 @@ const STEPS: { from: number; to: number; title: string; desc: string; keys: stri
 
 const DURATION = 8000; // 一轮动画 8 秒
 
+// ── 应用面板导览（按键教程之后的应用教程）────────────────
+const APP_TOUR: { title: string; desc: string }[] = [
+  {
+    title: '🛩 外部视景 + PFD',
+    desc: '中央大窗是外部视野（天空/跑道/云层）；左下悬浮的主飞行显示器：左侧空速带、中间姿态仪、右侧高度带，底部是航向与垂直速度',
+  },
+  {
+    title: '⚙ ENGINE MONITOR',
+    desc: '左右双发 N1 表、EGT 温度与燃油流量；下方的「1 · ENGINE 1/2」按钮与键盘 1/2 等效，切换引擎启停',
+  },
+  {
+    title: '🎛 FLIGHT CONTROLS',
+    desc: '油门滑块（可拖动）、襟翼 7 档分段按钮、GEAR 起落架、REVERSERS 反推（落地滑跑减速）、AP 自动驾驶总开关',
+  },
+  {
+    title: '📡 AIRCRAFT STATE',
+    desc: '实时飞行数据：空速 / 高度 / 垂直速度 / 航向 / 俯仰与坡度，用于随时掌握飞行状态',
+  },
+  {
+    title: '🧭 NAV / SYSTEMS + FMA',
+    desc: '自动驾驶状态与捕获目标、襟翼位置、剩余燃油；FMA 通告当前推力/垂直/横向模式（如 ALT HOLD、HDG HOLD）',
+  },
+  {
+    title: '🎛 AUTOPILOT MCP',
+    desc: 'AP 接通后此处激活：点旋钮或 ± 步进调节目标航向（5°）、速度（5 kt）、高度（500 ft）',
+  },
+  {
+    title: '🏮 顶栏控制',
+    desc: '昼夜主题切换、暂停/继续（Space）、重置全部状态、全屏；右上角时钟为本地时间',
+  },
+  {
+    title: '⌨ 键盘 / 触摸',
+    desc: '键盘为完整操作（见上方速查）；滑块、按钮、旋钮均支持鼠标与触摸，方向键控制俯仰与坡度',
+  },
+];
+
 // 缓动
 const easeIn = (t: number) => t * t * t;
 const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
@@ -92,11 +128,12 @@ function PlaneSVG({ gearRef }: { gearRef: React.RefObject<SVGGElement | null> })
   );
 }
 
-export function IntroScreen({ onStart }: { onStart: () => void }) {
+export function IntroScreen({ onNext }: { onNext: () => void }) {
   const stageRef = useRef<HTMLDivElement>(null);
   const planeRef = useRef<HTMLDivElement>(null);
   const gearRef = useRef<SVGGElement>(null);
   const linesRef = useRef<HTMLDivElement>(null);
+  const flameRef = useRef<HTMLDivElement>(null);
   const [stepIdx, setStepIdx] = useState(0);
 
   // 自播放起飞动画：rAF 驱动位姿 + 步骤高亮
@@ -118,6 +155,12 @@ export function IntroScreen({ onStart }: { onStart: () => void }) {
       if (linesRef.current) {
         linesRef.current.style.opacity = p < 0.55 ? String(Math.min(1, p * 6)) : '0';
         linesRef.current.style.backgroundPosition = `${-p * 900}px 0`;
+      }
+      // 物理动画化：引擎尾焰随推力长度变化（滑跑最长，爬升收缩）
+      if (flameRef.current) {
+        const thrust = p < 0.5 ? Math.min(1, p / 0.3) : p < 0.62 ? 1 : 0.4;
+        flameRef.current.style.transform = `scaleX(${thrust.toFixed(3)})`;
+        flameRef.current.style.opacity = p < 0.05 ? '0' : '0.85';
       }
       const idx = STEPS.findIndex((s) => p >= s.from && p < s.to);
       setStepIdx((prev) => (prev === idx || idx < 0 ? prev : idx));
@@ -173,8 +216,9 @@ export function IntroScreen({ onStart }: { onStart: () => void }) {
             <div className="stage-runway">
               <div className="stage-runway-center" />
             </div>
-            {/* 飞机 */}
+            {/* 飞机（含引擎尾焰——物理动画化）*/}
             <div className="tutorial-plane" ref={planeRef}>
+              <div className="engine-flame" ref={flameRef} />
               <PlaneSVG gearRef={gearRef} />
             </div>
             {/* 远处云 */}
@@ -192,11 +236,25 @@ export function IntroScreen({ onStart }: { onStart: () => void }) {
               </li>
             ))}
           </ol>
+
+          {/* 应用面板导览（应用教程）*/}
+          <div className="tour-title">
+            <span className="tour-title-dot" />
+            APP TOUR · 驾驶舱面板导览
+          </div>
+          <div className="tour-grid">
+            {APP_TOUR.map((t) => (
+              <div className="tour-card" key={t.title}>
+                <div className="tour-card-title">{t.title}</div>
+                <div className="tour-card-desc">{t.desc}</div>
+              </div>
+            ))}
+          </div>
         </section>
 
         {/* 进入按钮 + 键位提示 */}
-        <button className="intro-start" type="button" onClick={onStart}>
-          开始飞行
+        <button className="intro-start" type="button" onClick={onNext}>
+          选择航线
           <span className="intro-start-arrow">→</span>
         </button>
         <div className="intro-hint">

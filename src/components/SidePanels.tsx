@@ -1,7 +1,8 @@
 'use client';
 
 import type { SimState } from '@/lib/sim-types';
-import { fmt, pad3 } from '@/lib/sim-types';
+import { fmt, pad3, hdgError } from '@/lib/sim-types';
+import { ROUTES } from '@/lib/routes';
 import type { FlightSim } from '@/hooks/useFlightSim';
 
 // ── 通用面板头 ──────────────────────────────────────────
@@ -71,18 +72,49 @@ export function QuickGuide() {
 }
 
 // ── 导航 / 系统（侧栏）──────────────────────────────────
-export function NavSystems({ snap }: { snap: SimState }) {
+interface NavProps {
+  snap: SimState;
+  landingMode: boolean;
+  onToggleLanding: () => void;
+}
+
+export function NavSystems({ snap, landingMode, onToggleLanding }: NavProps) {
   const captured = snap.ap
     ? `IAS ${fmt(snap.apTarget.ias)} · ALT ${fmt(snap.apTarget.alt)} · HDG ${pad3(snap.apTarget.hdg)}`
     : '—';
+  // 固定航线航向指示
+  const route = ROUTES.find((r) => r.id === snap.routeId) || null;
+  const dev = route ? hdgError(route.courseDeg, snap.hdg) : 0; // >0 需右转
+  const devText = !route
+    ? '—'
+    : Math.abs(dev) < 3
+      ? '✓ 在航线上'
+      : (dev > 0 ? '▶ 需右转 ' : '◀ 需左转 ') + Math.abs(Math.round(dev)) + '°';
   return (
     <div className="panel">
       <PanelHead title="NAV / SYSTEMS" kicker="PRIMARY" />
       <MetricRow label="AP STATUS" value={snap.ap ? 'CMD / ACTIVE' : 'DISENGAGED'} cls={snap.ap ? 'good' : ''} />
       <MetricRow label="CAPTURED" value={captured} />
+      {route && (
+        <>
+          <MetricRow label="ROUTE COURSE" value={pad3(route.courseDeg) + '° · ' + route.name} />
+          <MetricRow
+            label="DEVIATION"
+            value={devText}
+            cls={Math.abs(dev) < 3 ? 'good' : 'hot'}
+          />
+        </>
+      )}
       <MetricRow label="FLAP POSITION" value={fmt(snap.flap) + '°'} />
       <MetricRow label="FUEL ONBOARD" value={fmt(snap.fuel, 1) + ' t'} />
       <MetricRow label="SIM RATE" value="1.0× REALTIME" cls="good" />
+      <button
+        className={'landing-btn' + (landingMode ? ' on' : '')}
+        type="button"
+        onClick={onToggleLanding}
+      >
+        {landingMode ? '🛬 降落模式 · ON（点击关闭）' : '🛬 开启降落模式（巡航时）'}
+      </button>
     </div>
   );
 }
@@ -92,11 +124,12 @@ export function FMA({ snap }: { snap: SimState }) {
   const thrust = snap.reverse
     ? 'REVERSE'
     : snap.throttle < 5 ? 'IDLE' : snap.throttle > 85 ? 'TOGA' : 'THRUST';
+  const vert = snap.ap ? (snap.landingMode ? 'LAND SEQ' : 'ALT HOLD') : 'SPEED';
   return (
     <div className="panel">
       <PanelHead title="FLIGHT MODE ANNUNCIATOR" kicker="FMA" />
       <MetricRow label="THRUST" value={thrust} />
-      <MetricRow label="VERTICAL" value={snap.ap ? 'ALT HOLD' : 'SPEED'} />
+      <MetricRow label="VERTICAL" value={vert} />
       <MetricRow label="LATERAL" value={snap.ap ? 'HDG HOLD' : 'HDG'} />
     </div>
   );

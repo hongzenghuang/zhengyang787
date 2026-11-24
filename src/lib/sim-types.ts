@@ -12,6 +12,8 @@ export interface ApTarget {
   hdg: number;  // deg 0-359
 }
 
+export type FlightPhase = 'ground' | 'takeoff' | 'climb' | 'cruise' | 'descent' | 'landing';
+
 export interface SimState {
   running: boolean;      // 是否推进（暂停=false）
   t: number;             // 模拟时长（秒）
@@ -19,8 +21,8 @@ export interface SimState {
   alt: number;           // 高度 ft
   vsi: number;           // 垂直速度 fpm
   hdg: number;           // 航向 deg 0-359
-  pitch: number;         // 俯仰 deg（-12 ~ +15）
-  bank: number;          // 坡度 deg（-35 ~ +35）
+  pitch: number;         // 俯仰角 deg（-12 ~ +15）
+  bank: number;          // 坡度 deg（-35 ~ 35）
   throttle: number;      // 油门 0-100 %
   flap: number;          // 襟翼 0/5/10/15/20/25/30
   gear: boolean;         // 起落架放下=true
@@ -30,6 +32,16 @@ export interface SimState {
   eng: [EngineState, EngineState];
   fuel: number;          // 燃油吨
   lastAlert: string;     // 上次警报 key（音效去重）
+  /** 选定航线（教程后选择；null=自由飞行） */
+  routeId: string | null;
+  /** 降落模式（巡航时可切换；开启后 AP 目标自动转为进近剖面） */
+  landingMode: boolean;
+  /** 降落过程：进入进近后曾在空中（接地检测用） */
+  inAir: boolean;
+  /** 起落架接地时刻（s.t；0=尚未接地） */
+  touchdownAt: number;
+  /** 已成功停稳（接地后减速至停住） */
+  stopped: boolean;
 }
 
 export interface AlertItem {
@@ -77,6 +89,11 @@ export const INITIAL_STATE: SimState = {
   ],
   fuel: 94.8,
   lastAlert: '',
+  routeId: null,
+  landingMode: false,
+  inAir: false,
+  touchdownAt: 0,
+  stopped: false,
 };
 
 // ── 工具 ────────────────────────────────────────────────

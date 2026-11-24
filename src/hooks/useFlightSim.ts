@@ -4,13 +4,13 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 import {
   SimState, INITIAL_STATE, LIMITS, FLAP_STOPS, clamp,
 } from '@/lib/sim-types';
-import { physicsStep } from '@/lib/physics';
+import { physicsStep, autoRecover } from '@/lib/physics';
 import {
   canEngageAP, captureTargets, adjustAPTarget, canEngageReverse,
   AP_INHIBIT_MSG, REV_INHIBIT_MSG,
 } from '@/lib/autopilot';
-import { computeAlerts, normalMessage } from '@/lib/alerts';
-import { unlockAudio, playAlert } from '@/lib/audio';
+import { computeAlerts, normalMessage, AlertItemPro } from '@/lib/alerts';
+import { unlockAudio, playWarning, playCaution, playInfo } from '@/lib/audio';
 
 export type FlashKind = 'normal' | 'warn' | 'danger';
 
@@ -19,8 +19,8 @@ export interface FlightSim {
   simRef: React.MutableRefObject<SimState>;
   /** 节流后的状态快照（驱动 React UI） */
   snap: SimState;
-  /** 告警列表（含 danger 标志） */
-  alerts: { text: string; danger: boolean }[];
+  /** 告警列表（含 AI 恢复程序） */
+  alerts: AlertItemPro[];
   /** 无告警时的正常提示 */
   normalMsg: string;
   /** 临时 flash 提示（操作被拒绝等） */
@@ -43,6 +43,12 @@ export interface FlightSim {
     reset: () => void;
     unlockAudio: () => void;
     flashAlert: (kind: FlashKind, text: string) => void;
+    /** 选定航线：预置巡航目标（教程后航线选择页调用） */
+    setRoute: (routeId: string | null, cruiseAlt?: number, cruiseIas?: number) => void;
+    /** 降落模式：巡航时开启，AP 目标自动转进近剖面（3000ft / 180kt / 放轮放襟翼） */
+    toggleLandingMode: () => void;
+    /** AI 自动恢复：执行警报条上的恢复程序 */
+    autoRecover: (fix: AlertItemPro['autoFix']) => void;
   };
 }
 
@@ -143,28 +149,90 @@ export function useFlightSim(): FlightSim {
         unlockAudio();
       },
       flashAlert,
+      setRoute(routeId, cruiseAlt, cruiseIas) {
+        const s = simRef.current;
+        s.routeId = routeId;
+        s.landingMode = false;
+        if (routeId && cruiseAlt && cruiseIas) {
+          s.apTarget.alt = cruiseAlt;
+          s.apTarget.ias = cruiseIas;
+        }
+        sync();
+      },
+      toggleLandingMode() {
+        const s = simRef.current;
+        if (!s.landingMode) {
+          // 开启进近剖面：目标高度 3000ft / 速度 180kt，并按高度逐级放形态
+          s.landingMode = true;
+          s.apTarget.alt = Math.min(s.apTarget.alt, 3000);
+          s.apTarget.ias = 180;
+          if (s.alt > 15000) s.flap = 10;
+          else if (s.alt > 8000) { s.flap = 15; s.gear = true; }
+          else { s.flap = 25; s.gear = true; }
+        } else {
+          s.landingMode = false;
+        }
+        sync();
+      },
+      autoRecover(fix) {
+        if (!fix) return;
+        autoRecover(simRef.current, fix);
+        sync();
+      },
     };
   }, [sync, flashAlert]);
 
   // ── 主循环：物理推进 + 节流快照 + 警报音效 ──
+  // 警报显示做「粘滞防抖」：警报消失后保留 1.2s 再移除（消除临界值抖动闪烁），
+  // 只有新增警报才响铃；显示列表存 ref 供快照层读取。
+  const displayAlertsRef = useRef<AlertItemPro[]>([]);
+  const pendingRef = useRef<{ list: AlertItemPro[]; hideAt: number } | null>(null);
+
   useEffect(() => {
     let raf = 0;
     let last = performance.now();
     let frames = 0;
     let lastAlertKey = '';
+    let prevTouchdownAt = 0;
+    let prevStopped = false;
 
     const loop = (now: number) => {
       const dt = Math.min(LIMITS.dtMax, (now - last) / 1000);
       last = now;
-      physicsStep(simRef.current, dt);
+      const s = simRef.current;
+      physicsStep(s, dt);
 
-      // 警报音效：仅当告警集合变化时触发
+      // 降落事件：接地 / 停稳（边沿触发，各响一次）
+      if (s.touchdownAt > 0 && prevTouchdownAt === 0) playInfo();
+      if (s.stopped && !prevStopped) playInfo();
+      prevTouchdownAt = s.touchdownAt;
+      prevStopped = s.stopped;
+
+      // 警报计算（粘滞防抖 + 分级音效，仅新增触发）
       const list = computeAlerts(simRef.current);
       const key = list.map((a) => a.text).join('|');
       if (key !== lastAlertKey) {
-        if (key) playAlert();
+        const prevSet = new Set(lastAlertKey.split('|').filter(Boolean));
+        const added = list.some((a) => !prevSet.has(a.text));
+        if (added) {
+          // 新增：立即显示并响铃（分级）
+          const dangerCount = list.filter((a) => a.danger).length;
+          if (dangerCount > 0) playWarning();
+          else playCaution();
+          displayAlertsRef.current = list;
+          pendingRef.current = null;
+        } else if (list.length < displayAlertsRef.current.length) {
+          // 只有移除：延迟 1.2s 应用，防止临界值反复进出
+          pendingRef.current = { list, hideAt: now + 1200 };
+        } else {
+          displayAlertsRef.current = list;
+        }
         lastAlertKey = key;
         simRef.current.lastAlert = key;
+      }
+      if (pendingRef.current && now >= pendingRef.current.hideAt) {
+        displayAlertsRef.current = pendingRef.current.list;
+        pendingRef.current = null;
       }
 
       // 节流同步 UI
@@ -180,7 +248,7 @@ export function useFlightSim(): FlightSim {
   void renderTick; // renderTick 仅用于驱动 re-render
 
   const snap = simRef.current;
-  const alerts = computeAlerts(snap);
+  const alerts = displayAlertsRef.current;
 
   return {
     simRef,

@@ -42,7 +42,7 @@ export function apComputeThrottle(s: SimState): number {
   return clamp((dragEstimate + requestedAccel / 0.12) / 240, 0, 1);
 }
 
-/** AP 俯仰与坡度目标（含失速 / 超速保护覆盖） */
+/** AP 俯仰与坡度目标（含失速 / 超速 / 最终进近保护） */
 export function apComputePitchBank(
   s: SimState,
   stall: boolean
@@ -54,6 +54,10 @@ export function apComputePitchBank(
   );
   if (stall) pitchTarget = Math.min(pitchTarget, -2);      // 失速：推头
   if (s.ias > 340) pitchTarget = Math.max(pitchTarget, 3); // 超速：拉杆
+  // 降落模式最终进近：低高度改恒定下滑角，避免高度差控制在近地悬停平衡
+  if (s.landingMode && s.alt < 500) {
+    pitchTarget = -2.5;
+  }
 
   const bankTarget = clamp(hdgError(s.apTarget.hdg, s.hdg) * 0.8, -25, 25);
   return { pitchTarget, bankTarget };

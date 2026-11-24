@@ -4,6 +4,8 @@ import { useEffect, useRef } from 'react';
 import type { SimState } from '@/lib/sim-types';
 import { clamp } from '@/lib/sim-types';
 import { PFD } from './PFD';
+import { ROUTES } from '@/lib/routes';
+import { hdgError } from '@/lib/sim-types';
 
 interface ViewportProps {
   simRef: React.MutableRefObject<SimState>;
@@ -46,6 +48,24 @@ export function Viewport({ simRef, snap }: ViewportProps) {
   const mm = String(Math.floor(snap.t / 60)).padStart(2, '0');
   const ss = String(Math.floor(snap.t % 60)).padStart(2, '0');
 
+  // 固定航线航向指示：目标航向 + 偏差（◀左转 / ▶右转 / ✓在航线上）
+  const route = ROUTES.find((r) => r.id === snap.routeId) || null;
+  let courseChip: string | null = null;
+  let courseCls = '';
+  if (route && snap.alt > 40) {
+    const dev = hdgError(route.courseDeg, snap.hdg); // >0 需右转
+    if (Math.abs(dev) < 3) {
+      courseChip = `RTE ${route.courseDeg}° ✓ ON COURSE`;
+      courseCls = 'on-course';
+    } else if (dev > 0) {
+      courseChip = `RTE ${route.courseDeg}° ▶ 右转 ${Math.round(dev)}°`;
+      courseCls = 'turn-right';
+    } else {
+      courseChip = `RTE ${route.courseDeg}° ◀ 左转 ${Math.round(-dev)}°`;
+      courseCls = 'turn-left';
+    }
+  }
+
   return (
     <section className="viewport" aria-label="外部飞行视景和主飞行显示器">
       <div className="sky" id="sky" ref={skyRef}>
@@ -62,6 +82,7 @@ export function Viewport({ simRef, snap }: ViewportProps) {
           <span id="flightMode">{flightMode}</span>
         </span>
         <span className="chip">SIM · 787-10 · <span id="simTime">{mm}:{ss}</span></span>
+        {courseChip && <span className={'chip course-chip ' + courseCls}>{courseChip}</span>}
       </div>
       <div className="pfd-wrap">
         <PFD simRef={simRef} />

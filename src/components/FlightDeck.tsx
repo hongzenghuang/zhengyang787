@@ -9,6 +9,8 @@ import { AlertStrip } from './AlertStrip';
 import { FlightControls } from './FlightControls';
 import { EngineMonitor } from './EngineMonitor';
 import { AircraftState, QuickGuide, NavSystems, FMA, AutopilotMCP } from './SidePanels';
+import { LcdStatusLine } from './LcdStatusLine';
+import { LandingBanner } from './LandingBanner';
 
 /**
  * 787-10 驾驶舱：组装所有子面板。
@@ -42,7 +44,14 @@ export function FlightDeck() {
           </div>
 
           <Viewport simRef={sim.simRef} snap={sim.snap} />
-          <AlertStrip alerts={sim.alerts} normalMsg={sim.normalMsg} flash={sim.flash} />
+          <AlertStrip
+            alerts={sim.alerts}
+            normalMsg={sim.normalMsg}
+            flash={sim.flash}
+            onAutoRecover={sim.actions.autoRecover}
+          />
+          <LcdStatusLine snap={sim.snap} />
+          <LandingBanner snap={sim.snap} />
 
           <div className="bottom">
             <FlightControls snap={sim.snap} actions={sim.actions} />
@@ -53,7 +62,11 @@ export function FlightDeck() {
 
         <aside className="side">
           <EngineMonitor snap={sim.snap} actions={sim.actions} />
-          <NavSystems snap={sim.snap} />
+          <NavSystems
+            snap={sim.snap}
+            landingMode={sim.snap.landingMode}
+            onToggleLanding={sim.actions.toggleLandingMode}
+          />
           <FMA snap={sim.snap} />
           <AutopilotMCP snap={sim.snap} actions={sim.actions} />
         </aside>

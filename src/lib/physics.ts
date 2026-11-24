@@ -47,6 +47,14 @@ export function physicsStep(s: SimState, dt: number): void {
     (s.ias > 340 ? 30 : 0);
   if (s.gear && s.alt > 80) climb -= 8;
 
+  // ── 起飞速度门槛（Vr）：地面滑跑且未达抬轮速度时不允许离地 ──
+  // 低速拉杆只能压住前轮（pitch 被限制），爬升量强制为负保持贴地
+  const vr = 145 - s.flap * 0.2;
+  if (s.alt < 20 && s.ias < vr) {
+    s.pitch = Math.min(s.pitch, 0.5);
+    climb = Math.min(climb, -20);
+  }
+
   // ── AP 俯仰 / 坡度 / 航向控制 ──
   if (s.ap) {
     const { pitchTarget, bankTarget } = apComputePitchBank(s, stall);
@@ -60,6 +68,65 @@ export function physicsStep(s: SimState, dt: number): void {
   s.pitch = clamp(s.pitch, LIMITS.pitchMin, LIMITS.pitchMax);
   s.bank = clamp(s.bank, LIMITS.bankMin, LIMITS.bankMax);
 
+  // ── 降落模式：起落架接地与成功停稳检测（AUTO-LAND 全流程）──
+  if (s.landingMode && !s.stopped) {
+    // 进近中在空中（>100ft）→ 标记 inAir
+    if (s.alt > 100) s.inAir = true;
+    // 曾在空中且触地（alt ≤ 5ft）→ 记录接地时刻，自动断开 AP（解除反推互锁）
+    if (s.inAir && s.touchdownAt === 0 && s.alt <= 5) {
+      s.touchdownAt = s.t;
+      s.inAir = false;
+      s.ap = false;
+    }
+    // 接地滑跑：自动油门怠速 + 自动反推减速（直至停稳）
+    if (s.touchdownAt > 0 && s.alt <= 2 && s.ias >= 3) {
+      s.throttle = 0;
+      s.reverse = true;
+    }
+    // 减速至 3kt 以下 → 成功停稳
+    if (s.touchdownAt > 0 && s.alt <= 2 && s.ias < 3) {
+      s.stopped = true;
+      s.throttle = 0;
+      s.reverse = false;
+    }
+  }
+
   // ── 燃油消耗 ──
   s.fuel = Math.max(0, s.fuel - ePower * 0.012 * dt);
+}
+
+/** AI 自动恢复：由警报条上的 AUTO RECOVER 按钮触发的一次性修正动作 */
+export function autoRecover(
+  s: SimState,
+  fix: 'pushNose' | 'pullUp' | 'levelOff' | 'addPower' | 'idlePower' | 'restartEng' | 'gearUp' | 'flap10'
+): void {
+  switch (fix) {
+    case 'pushNose':   // 失速：推杆 + 满油门
+      s.pitch = -4;
+      s.throttle = 100;
+      break;
+    case 'pullUp':     // 近地：拉杆 + 满油门
+      s.pitch = 10;
+      s.throttle = 100;
+      break;
+    case 'levelOff':  // 高度偏离：回到目标高度的平飞俯仰
+      s.pitch = clamp((s.apTarget.alt - s.alt) * 0.0015, -3, 8);
+      break;
+    case 'addPower':
+      s.throttle = Math.min(100, s.throttle + 20);
+      break;
+    case 'idlePower':
+      s.throttle = 0;
+      break;
+    case 'restartEng':
+      s.eng[0].on = true;
+      s.eng[1].on = true;
+      break;
+    case 'gearUp':
+      s.gear = false;
+      break;
+    case 'flap10':
+      s.flap = 10;
+      break;
+  }
 }
